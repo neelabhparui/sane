@@ -1,0 +1,198 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from sane_nav.core.models import ResolutionKind, SourceRange
+from sane_nav.mcp.server import McpServer
+from sane_nav.mcp.tools import McpToolService
+from sane_nav.parsing.java import JavaAdapter
+from sane_nav.parsing.kotlin import KotlinAdapter
+from sane_nav.parsing.markdown import MarkdownAdapter
+from sane_nav.parsing.python import PythonAdapter
+from sane_nav.paths import RepoPaths
+from sane_nav.storage.database import Database
+
+
+@pytest.fixture
+def repo_root(tmp_path: Path) -> Path:
+    # Set up sample repo in tmp_path
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    python_dir = tmp_path / "src"
+    python_dir.mkdir(parents=True)
+    (python_dir / "payment_service.py").write_bytes(
+        (fixtures_dir / "python" / "payment_service.py").read_bytes()
+    )
+
+    java_dir = tmp_path / "java" / "com" / "acme" / "auth"
+    java_dir.mkdir(parents=True)
+    (java_dir / "AuthService.java").write_bytes(
+        (fixtures_dir / "java" / "AuthService.java").read_bytes()
+    )
+
+    kt_dir = tmp_path / "kotlin" / "com" / "acme" / "checkout"
+    kt_dir.mkdir(parents=True)
+    (kt_dir / "CheckoutService.kt").write_bytes(
+        (fixtures_dir / "kotlin" / "CheckoutService.kt").read_bytes()
+    )
+
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "architecture.md").write_bytes(
+        (fixtures_dir / "markdown" / "architecture.md").read_bytes()
+    )
+
+    return tmp_path
+
+
+def test_python_adapter(repo_root: Path):
+    adapter = PythonAdapter()
+    py_file = repo_root / "src" / "payment_service.py"
+    source = py_file.read_bytes()
+    parsed = adapter.parse("src/payment_service.py", source)
+
+    names = [s.name for s in parsed.symbols]
+    assert "PaymentToken" in names
+    assert "PaymentGateway" in names
+    assert "PaymentRetryCoordinator" in names
+    assert "should_retry" in names
+    assert "schedule_retry" in names
+    assert "capture" in names
+
+    # Test skeleton redaction
+    skeleton = adapter.render_skeleton(source, parsed)
+    assert "# ... implementation omitted ..." in skeleton
+    assert "def should_retry" in skeleton
+    assert "Determines if a failure is retriable" in skeleton  # docstring preserved!
+
+
+def test_java_adapter(repo_root: Path):
+    adapter = JavaAdapter()
+    j_file = repo_root / "java" / "com" / "acme" / "auth" / "AuthService.java"
+    source = j_file.read_bytes()
+    parsed = adapter.parse("AuthService.java", source)
+
+    names = [s.name for s in parsed.symbols]
+    assert "AuthService" in names
+    assert "validateToken" in names
+    assert "rotateRefreshToken" in names
+
+    skeleton = adapter.render_skeleton(source, parsed)
+    assert "// ... implementation omitted ..." in skeleton
+    assert "public String rotateRefreshToken" in skeleton
+
+
+def test_kotlin_adapter(repo_root: Path):
+    adapter = KotlinAdapter()
+    kt_file = repo_root / "kotlin" / "com" / "acme" / "checkout" / "CheckoutService.kt"
+    source = kt_file.read_bytes()
+    parsed = adapter.parse("CheckoutService.kt", source)
+
+    names = [s.name for s in parsed.symbols]
+    assert "CheckoutService" in names
+    assert "submitOrder" in names
+
+    # References
+    refs = [r.spelling for r in parsed.references]
+    assert "capture" in refs
+
+
+def test_markdown_adapter(repo_root: Path):
+    adapter = MarkdownAdapter()
+    md_file = repo_root / "docs" / "architecture.md"
+    source = md_file.read_bytes()
+    parsed = adapter.parse("docs/architecture.md", source)
+
+    headings = [d.heading for d in parsed.docs]
+    assert "System Architecture" in headings
+    assert "Authentication" in headings
+    assert "Refresh tokens" in headings
+    assert "Retry Policy" in headings
+
+    # Heading hierarchy check
+    retry_doc = [d for d in parsed.docs if d.heading == "Retry Policy"][0]
+    assert retry_doc.heading_path == ("System Architecture", "Payments and Billing", "Retry Policy")
+
+
+def test_indexing_and_mcp_tools(repo_root: Path):
+    service = McpToolService(repo_root)
+
+    # 1. Index everything
+    stats = service.indexer.index_all()
+    assert stats["total_files"] == 4
+    assert stats["indexed_files"] == 4
+
+    # 2. Check index_status
+    status = service.index_status()
+    assert status["files"] == 4
+    assert status["symbols"] > 0
+    assert status["docs"] > 0
+
+    # 3. Search semantic
+    search_res = service.search_semantic("refresh token")
+    assert search_res["count"] > 0
+    found_names = [r.get("name") or r.get("title") for r in search_res["results"]]
+    assert any("rotateRefreshToken" in str(n) or "Refresh tokens" in str(n) for n in found_names)
+
+    # 4. Get skeleton
+    skel_res = service.get_skeleton("src/payment_service.py")
+    assert "PaymentService" in skel_res["skeleton"]
+    assert "implementation omitted" in skel_res["skeleton"]
+
+    # 5. Get symbol code
+    sym_res = service.get_symbol_code("PaymentRetryCoordinator.should_retry")
+    assert sym_res["status"] == "success"
+    assert "TIMEOUT" in sym_res["code"]
+
+    # 6. Find usages
+    usage_res = service.find_usages("capture")
+    assert usage_res["total_found"] > 0
+    assert any("CheckoutService.kt" in u["file"] for u in usage_res["exact_usages"] + usage_res["probable_usages"])
+
+    # 7. Get context for feature
+    ctx_res = service.get_context("Retry Policy")
+    assert "PaymentRetryCoordinator" in ctx_res["content"]
+    assert "[Documentation]" in ctx_res["content"]
+
+
+def test_mcp_server_jsonrpc(repo_root: Path):
+    service = McpToolService(repo_root)
+    service.indexer.index_all()
+
+    server = McpServer(repo_root)
+
+    # Test initialize
+    init_resp = server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {},
+    })
+    assert init_resp["result"]["serverInfo"]["name"] == "sane-nav"
+
+    # Test tools/list
+    list_resp = server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+    })
+    tool_names = [t["name"] for t in list_resp["result"]["tools"]]
+    assert "search_semantic" in tool_names
+    assert "get_skeleton" in tool_names
+    assert "get_symbol_code" in tool_names
+    assert "find_usages" in tool_names
+    assert "get_context" in tool_names
+
+    # Test tools/call
+    call_resp = server.handle_request({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "search_semantic",
+            "arguments": {"query": "PaymentService"},
+        },
+    })
+    assert call_resp["result"]["isError"] is False
+    content_raw = call_resp["result"]["content"][0]["text"]
+    assert "PaymentService" in content_raw

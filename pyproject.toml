@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sane-nav"
+version = "0.1.0"
+description = "Token-efficient progressive-disclosure semantic code navigation engine and MCP server for AI coding agents"
+readme = "README.md"
+authors = [
+    { name = "S.A.N.E. Contributors" }
+]
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "code-navigation",
+    "ai-agents",
+    "token-efficiency",
+    "ast",
+    "progressive-disclosure",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "watchfiles>=0.21.0",
+    "pathspec>=0.12.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=1.0.0",
+]
+semantic = [
+    "sqlite-vec",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+    "mypy>=1.9.0",
+]
+
+[project.scripts]
+sane = "sane_nav.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sane_nav*"]

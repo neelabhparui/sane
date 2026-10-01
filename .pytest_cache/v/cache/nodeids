@@ -1,0 +1,8 @@
+[
+  "tests/test_sane.py::test_indexing_and_mcp_tools",
+  "tests/test_sane.py::test_java_adapter",
+  "tests/test_sane.py::test_kotlin_adapter",
+  "tests/test_sane.py::test_markdown_adapter",
+  "tests/test_sane.py::test_mcp_server_jsonrpc",
+  "tests/test_sane.py::test_python_adapter"
+]

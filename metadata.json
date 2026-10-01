@@ -1,0 +1,6 @@
+{
+  "name": "S.A.N.E. — Semantic Agent Navigation Engine",
+  "description": "Local, token-efficient progressive-disclosure code navigation engine and MCP server for AI coding agents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
