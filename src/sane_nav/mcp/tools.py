@@ -141,6 +141,11 @@ class McpToolService:
             Dictionary with file path and redacted skeleton text.
         """
         safe_path = self.repo_paths.resolve_user_path(file_path)
+        if not safe_path.exists():
+            return {"error": f"File '{file_path}' does not exist"}
+        if not safe_path.is_file():
+            return {"error": f"Path '{file_path}' is not a file"}
+
         skeleton = self.skeleton_renderer.render_file_skeleton(
             rel_path=self.repo_paths.to_relative(safe_path),
             max_chars=max_chars or 12000,
@@ -186,6 +191,11 @@ class McpToolService:
 
         cand = candidates[0]
         abs_p = self.repo_paths.resolve_user_path(cand["file_path"])
+        if not abs_p.exists() or not abs_p.is_file():
+            return {
+                "status": "not_found",
+                "error": f"Indexed file '{cand['file_path']}' is missing or not a regular file on disk.",
+            }
         code = render_symbol_body(
             file_path=abs_p,
             start_line=cand["start_line"],
@@ -259,6 +269,8 @@ class McpToolService:
 
         for o in occs:
             abs_p = self.repo_paths.resolve_user_path(o["file_path"])
+            if not abs_p.exists() or not abs_p.is_file():
+                continue
             snippet = render_code_snippet(abs_p, target_line=o["start_line"], context_lines=2)
             item = {
                 "file": o["file_path"],

@@ -37,11 +37,21 @@ class KotlinAdapter:
             re.MULTILINE,
         )
 
-        # Regex for Kotlin functions:
+        # Regex for Kotlin function headers, matched only up to the opening
+        # parenthesis of the parameter list. The parameter list itself is
+        # found via manual balanced-paren scanning below (see fun_regex.finditer
+        # loop) because parameter types can themselves contain parens (e.g.
+        # lambda types like "() -> Unit" or "(Int, String) -> Boolean"), which
+        # a single non-greedy "\(([^)]*)\)" cannot match correctly — it closes
+        # on the first ")" it finds, garbling the whole match and silently
+        # dropping the function.
         # e.g. "@Transactional suspend fun capture(intent: PaymentIntent, amount: Money): CaptureResult"
         fun_regex = re.compile(
-            r"((?:@\w+(?:\([^)]*\))?\s+)*(?:public|protected|private|internal|override|suspend|inline|open|abstract)?\s*fun\s+(?:<[^>]+>\s+)?(?:([A-Za-z0-9_]+)\.)?([A-Za-z0-9_]+)\s*\(([^)]*)\)(?:\s*:\s*([A-Za-z0-9_<>, \?\.\[\]]+))?)\s*(\{|=)",
+            r"(?:@\w+(?:\([^)]*\))?\s+)*(?:public|protected|private|internal|override|suspend|inline|open|abstract)?\s*fun\s+(?:<[^>]+>\s+)?(?:([A-Za-z0-9_]+)\.)?([A-Za-z0-9_]+)\s*\(",
             re.MULTILINE,
+        )
+        fun_tail_regex = re.compile(
+            r"\s*(?::\s*([A-Za-z0-9_<>, \?\.\[\]]+))?\s*(\{|=)"
         )
 
         def extract_kdoc(byte_pos: int) -> Optional[str]:
@@ -54,8 +64,7 @@ class KotlinAdapter:
                     return cleaned.strip()
             return None
 
-        current_class: Optional[str] = None
-        current_class_key: Optional[str] = None
+        class_symbols: list[ParsedSymbol] = []
 
         for m in class_regex.finditer(source_text):
             sig = m.group(1).strip()
@@ -86,34 +95,56 @@ class KotlinAdapter:
             symbol_key = build_symbol_key("kotlin", path, package_name, c_name, line=start_line)
 
             docstring = extract_kdoc(start_pos)
-            symbols.append(
-                ParsedSymbol(
-                    name=c_name,
-                    qualified_name=qualified_name,
-                    kind=c_kind,
-                    signature=sig,
-                    docstring=docstring,
-                    full_range=full_range,
-                    body_range=body_range,
-                    symbol_key=symbol_key,
-                )
+            class_symbol = ParsedSymbol(
+                name=c_name,
+                qualified_name=qualified_name,
+                kind=c_kind,
+                signature=sig,
+                docstring=docstring,
+                full_range=full_range,
+                body_range=body_range,
+                symbol_key=symbol_key,
             )
-
-            current_class = c_name
-            current_class_key = symbol_key
+            symbols.append(class_symbol)
+            class_symbols.append(class_symbol)
 
         for m in fun_regex.finditer(source_text):
-            sig = m.group(1).strip()
-            receiver_type = m.group(2)
-            f_name = m.group(3)
-            params = m.group(4).strip()
-            body_opener = m.group(6)  # "{" or "="
+            receiver_type = m.group(1)
+            f_name = m.group(2)
+            params_open_pos = m.end() - 1  # position of the "(" just matched
+
+            # Manually scan for the balanced closing paren of the parameter
+            # list, since parameter types can contain their own parens (e.g.
+            # lambda types like "() -> Unit"), which a simple non-greedy
+            # "[^)]*" regex cannot handle correctly.
+            paren_count = 1
+            idx = params_open_pos + 1
+            while idx < len(source_text) and paren_count > 0:
+                if source_text[idx] == "(":
+                    paren_count += 1
+                elif source_text[idx] == ")":
+                    paren_count -= 1
+                idx += 1
+            if paren_count != 0:
+                # Unbalanced parens (shouldn't normally happen) - skip.
+                continue
+            params_close_pos = idx  # index just past the matching ")"
+            params = source_text[params_open_pos + 1 : params_close_pos - 1].strip()
+
+            tail_match = fun_tail_regex.match(source_text, params_close_pos)
+            if not tail_match:
+                # No "{" or "=" body opener found right after params - skip.
+                continue
+            body_opener = tail_match.group(2)  # "{" or "="
+
             start_pos = m.start()
             start_line = source_text[:start_pos].count("\n") + 1
+            sig = source_text[start_pos : tail_match.end() - 1].strip()
 
+            header_end = tail_match.end()
             if body_opener == "{":
                 brace_count = 1
-                idx = m.end()
+                idx = header_end
                 while idx < len(source_text) and brace_count > 0:
                     if source_text[idx] == "{":
                         brace_count += 1
@@ -121,19 +152,34 @@ class KotlinAdapter:
                         brace_count -= 1
                     idx += 1
                 end_pos = idx
-                body_start = m.end() - 1
+                body_start = header_end - 1
             else:
                 # Expression body (= ...)
                 # Read until next statement or newline with lower indent
-                line_end = source_text.find("\n", m.end())
+                line_end = source_text.find("\n", header_end)
                 end_pos = line_end if line_end != -1 else len(source_text)
-                body_start = m.end() - 1
+                body_start = header_end - 1
 
             end_line = source_text[:end_pos].count("\n") + 1
             full_range = SourceRange(start_pos, end_pos, start_line, end_line)
             body_range = SourceRange(body_start, end_pos, source_text[:body_start].count("\n") + 1, end_line)
 
-            owner = receiver_type or current_class
+            # Determine the actual enclosing class by position: find the
+            # smallest (innermost) class symbol whose full_range textually
+            # contains this function's start_line. Do not rely on a single
+            # mutable "last class seen" variable, which misattributes every
+            # function to the last class/object/enum in the file.
+            enclosing_class = None
+            for cs in class_symbols:
+                if cs.full_range.start_line <= start_line <= cs.full_range.end_line:
+                    if enclosing_class is None or (
+                        cs.full_range.end_line - cs.full_range.start_line
+                        < enclosing_class.full_range.end_line - enclosing_class.full_range.start_line
+                    ):
+                        enclosing_class = cs
+
+            owner = receiver_type or (enclosing_class.name if enclosing_class else None)
+            owner_key = enclosing_class.symbol_key if enclosing_class and not receiver_type else None
             qualified_name = f"{owner}.{f_name}" if owner else f_name
             symbol_key = build_symbol_key(
                 "kotlin", path, owner or package_name, f_name, signature_params=params, line=start_line
@@ -149,7 +195,7 @@ class KotlinAdapter:
                     docstring=docstring,
                     full_range=full_range,
                     body_range=body_range,
-                    parent_key=current_class_key if not receiver_type else None,
+                    parent_key=owner_key,
                     symbol_key=symbol_key,
                 )
             )
