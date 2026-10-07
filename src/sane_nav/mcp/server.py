@@ -97,6 +97,8 @@ class McpServer:
                     res = self.service.get_symbol_code(**arguments)
                 elif tool_name == "find_usages":
                     res = self.service.find_usages(**arguments)
+                elif tool_name == "find_implementations":
+                    res = self.service.find_implementations(**arguments)
                 elif tool_name == "read_lines":
                     res = self.service.read_lines(**arguments)
                 elif tool_name == "get_file_tree":

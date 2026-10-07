@@ -120,10 +120,22 @@ class PythonAdapter:
 
                 base_names = []
                 for b in node.bases:
+                    b_name = None
                     if isinstance(b, ast.Name):
-                        base_names.append(b.id)
+                        b_name = b.id
                     elif isinstance(b, ast.Attribute):
-                        base_names.append(b.attr)
+                        b_name = b.attr
+                    if b_name:
+                        base_names.append(b_name)
+                        references.append(
+                            ParsedReference(
+                                spelling=b_name,
+                                role="extends",
+                                source_range=full_range,
+                                enclosing_symbol_key=symbol_key,
+                            )
+                        )
+
                 bases_str = f"({', '.join(base_names)})" if base_names else ""
                 signature = f"class {node.name}{bases_str}"
 

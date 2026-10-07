@@ -118,8 +118,7 @@ class Database:
                 parent_id = symbol_key_to_id.get(sym.parent_key) if sym.parent_key else None
                 s_cur = conn.execute(
                     """
-                    INSERT INTO symbols (
-                        file_id, parent_symbol_id, symbol_key, qualified_name, name, kind, visibility,
+                    INSERT INTO symbols (\n                        file_id, parent_symbol_id, symbol_key, qualified_name, name, kind, visibility,
                         signature, docstring, start_byte, end_byte, start_line, end_line,
                         signature_start_byte, signature_end_byte, body_start_byte, body_end_byte
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -299,6 +298,41 @@ class Database:
                 """,
                 (file_path,),
             )
+            return cur.fetchall()
+
+    def get_implementations(self, query: str, transitive: bool = True) -> list[sqlite3.Row]:
+        """Finds all direct and indirect implementers / subclasses of a symbol."""
+        candidates = self.get_symbol_by_id_or_name(query)
+        if not candidates:
+            return []
+
+        target_ids = [c["id"] for c in candidates]
+        placeholders = ",".join("?" for _ in target_ids)
+
+        with self.get_connection() as conn:
+            sql = f"""
+            WITH RECURSIVE subtype_graph(sym_id, depth) AS (
+                -- Direct implementers / subclasses (depth 1)
+                SELECT e.source_symbol_id, 1
+                FROM edges e
+                WHERE e.target_symbol_id IN ({placeholders}) AND e.kind IN ('implements', 'extends')
+                UNION
+                -- Transitive implementers / subclasses (depth + 1)
+                SELECT e.source_symbol_id, g.depth + 1
+                FROM edges e
+                JOIN subtype_graph g ON e.target_symbol_id = g.sym_id
+                WHERE e.kind IN ('implements', 'extends') AND ? = 1
+            )
+            SELECT DISTINCT
+                s.id, s.symbol_key, s.name, s.qualified_name, s.kind, s.signature,
+                s.start_line, s.end_line, f.path as file_path, g.depth
+            FROM subtype_graph g
+            JOIN symbols s ON g.sym_id = s.id
+            JOIN files f ON s.file_id = f.id
+            ORDER BY g.depth ASC, s.name ASC;
+            """
+            params = [*target_ids, 1 if transitive else 0]
+            cur = conn.execute(sql, params)
             return cur.fetchall()
 
     def get_stats(self) -> dict[str, Any]:

@@ -68,6 +68,18 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "find_implementations",
+        "description": "Finds all classes or interfaces that directly or transitively implement or extend a given class or interface across the repository.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Target interface or class name or qualified name."},
+                "transitive": {"type": "boolean", "description": "Whether to recursively include indirect implementers / subclasses (default: true)."},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "read_lines",
         "description": "Reads a precise, bounded slice of lines from a non-symbol or configuration file.",
         "inputSchema": {

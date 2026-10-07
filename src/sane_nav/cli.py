@@ -1,7 +1,7 @@
 """Command-Line Interface (CLI) for S.A.N.E.
 
 Exposes commands for repository initialization, indexing, MCP serving,
-health checks, symbol extraction, usage tracing, and agent configuration.
+health checks, symbol extraction, usage tracing, implementations, and agent configuration.
 """
 
 from __future__ import annotations
@@ -190,6 +190,28 @@ def cmd_usages(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_implementations(args: argparse.Namespace) -> int:
+    service = McpToolService(Path(args.repo).resolve())
+    res = service.find_implementations(args.symbol, transitive=not args.direct_only)
+    print(f"\n--- Implementations / Subclasses of '{args.symbol}' ({res['total_found']} found) ---")
+    if res.get("direct_implementers"):
+        print("\nDirect Implementers:")
+        for imp in res["direct_implementers"]:
+            print(f"  • {imp['name']} — {imp['file']}:{imp['lines'][0]} ({imp['kind']})")
+            if imp.get("signature"):
+                print(f"    {imp['signature']}")
+    if res.get("indirect_implementers"):
+        print("\nIndirect Implementers:")
+        for imp in res["indirect_implementers"]:
+            print(f"  • {imp['name']} (depth {imp['depth']}) — {imp['file']}:{imp['lines'][0]} ({imp['kind']})")
+            if imp.get("signature"):
+                print(f"    {imp['signature']}")
+    if res["total_found"] == 0:
+        print("  None found.")
+    print("")
+    return 0
+
+
 def cmd_clean(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo).resolve()
     paths = RepoPaths(repo_root)
@@ -345,6 +367,11 @@ def main() -> None:
     p_usage.add_argument("symbol", help="Symbol name or URI")
     p_usage.add_argument("--limit", type=int, default=10, help="Max usages")
 
+    # sane implementations
+    p_imp = subparsers.add_parser("implementations", parents=[repo_parent], help="Find classes implementing or extending a symbol")
+    p_imp.add_argument("symbol", help="Target symbol name or URI")
+    p_imp.add_argument("--direct-only", action="store_true", help="Only show direct implementers")
+
     # sane clean
     subparsers.add_parser("clean", parents=[repo_parent], help="Remove S.A.N.E. index and locks")
 
@@ -367,6 +394,7 @@ def main() -> None:
         "skeleton": cmd_skeleton,
         "symbol": cmd_symbol,
         "usages": cmd_usages,
+        "implementations": cmd_implementations,
         "clean": cmd_clean,
         "doctor": cmd_doctor,
         "setup": cmd_setup,

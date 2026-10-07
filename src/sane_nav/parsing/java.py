@@ -42,7 +42,7 @@ class JavaAdapter:
 
         # Regex for classes, interfaces, records, enums
         class_regex = re.compile(
-            r"((?:@\w+(?:\([^)]*\))?\s+)*(?:public|protected|private|static|final|abstract)?\s*(class|interface|record|enum)\s+([A-Za-z0-9_]+)(?:<[^>]+>)?(?:\s+extends\s+[^{]+)?(?:\s+implements\s+[^{]+)?)\s*\{",
+            r"((?:@\w+(?:\([^)]*\))?\s+)*(?:(?:public|protected|private|static|final|abstract|sealed|non-sealed)\s+)*(class|interface|record|enum)\s+([A-Za-z0-9_]+)(?:<[^>]+>)?(?:\s+extends\s+([^{]+?))?(?:\s+implements\s+([^{]+?))?)\s*\{",
             re.MULTILINE,
         )
 
@@ -74,6 +74,8 @@ class JavaAdapter:
             sig = m.group(1).strip()
             c_kind = m.group(2)
             c_name = m.group(3)
+            extends_clause = m.group(4)
+            implements_clause = m.group(5)
             start_pos = m.start()
             start_line = source_text[:start_pos].count("\n") + 1
 
@@ -111,6 +113,39 @@ class JavaAdapter:
 
             current_class = c_name
             current_class_key = symbol_key
+
+            # Extract extends references
+            if extends_clause:
+                for item in extends_clause.split(","):
+                    clean = re.sub(r"<.*?>", "", item).strip()
+                    match = re.search(r"([A-Za-z0-9_]+)$", clean)
+                    if match:
+                        s_name = match.group(1)
+                        if s_name not in ("Object",):
+                            references.append(
+                                ParsedReference(
+                                    spelling=s_name,
+                                    role="extends",
+                                    source_range=full_range,
+                                    enclosing_symbol_key=symbol_key,
+                                )
+                            )
+
+            # Extract implements references
+            if implements_clause:
+                for item in implements_clause.split(","):
+                    clean = re.sub(r"<.*?>", "", item).strip()
+                    match = re.search(r"([A-Za-z0-9_]+)$", clean)
+                    if match:
+                        s_name = match.group(1)
+                        references.append(
+                            ParsedReference(
+                                spelling=s_name,
+                                role="implements",
+                                source_range=full_range,
+                                enclosing_symbol_key=symbol_key,
+                            )
+                        )
 
         # Match methods inside classes
         for m in method_regex.finditer(source_text):
@@ -196,15 +231,15 @@ class JavaAdapter:
 
     def render_skeleton(self, source: bytes, parsed: ParsedFile) -> str:
         source_text = source.decode("utf-8", errors="replace")
-        methods = [
-            s for s in parsed.symbols
-            if s.kind == SymbolKind.METHOD.value and s.body_range
+        methods = [\
+            s for s in parsed.symbols\
+            if s.kind == SymbolKind.METHOD.value and s.body_range\
         ]
         methods.sort(key=lambda s: s.body_range.start_byte, reverse=True)
 
         result = list(source_text)
         for m in methods:
-            assert m.body_range is not None
+            assert m.body_range is not None\
             # Replace interior of method body '{ ... }' with '{\n        // ... implementation omitted ...\n    }'
             sb = m.body_range.start_byte
             eb = m.body_range.end_byte

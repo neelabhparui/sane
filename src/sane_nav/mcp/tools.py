@@ -1,7 +1,7 @@
 """Application services layer for Model Context Protocol (MCP) tool execution.
 
 Orchestrates search, context synthesis, skeleton extraction, symbol code lookup,
-usage tracing, bounded line reading, and directory traversal.
+usage tracing, bounded line reading, directory traversal, and type hierarchy traversal.
 """
 
 from __future__ import annotations
@@ -290,6 +290,62 @@ class McpToolService:
             "total_found": len(exact_usages) + len(probable_usages),
             "exact_usages": exact_usages,
             "probable_usages": probable_usages if include_probable else [],
+        }
+
+    def find_implementations(
+        self,
+        symbol: str,
+        transitive: bool = True,
+    ) -> dict[str, Any]:
+        """Finds all classes or interfaces that implement or extend a symbol.
+
+        Args:
+            symbol: Target interface or class name or qualified name.
+            transitive: If True, recursively includes indirect implementers.
+
+        Returns:
+            Dictionary with target symbol info and direct/indirect implementers.
+        """
+        candidates = self.db.get_symbol_by_id_or_name(symbol)
+        rows = self.db.get_implementations(symbol, transitive=transitive)
+
+        target_info = None
+        if candidates:
+            target_info = {
+                "symbol_id": candidates[0]["symbol_key"],
+                "name": candidates[0]["name"],
+                "qualified_name": candidates[0]["qualified_name"],
+                "kind": candidates[0]["kind"],
+                "file": candidates[0]["file_path"],
+                "lines": [candidates[0]["start_line"], candidates[0]["end_line"]],
+            }
+
+        direct = []
+        indirect = []
+        for r in rows:
+            entry = {
+                "symbol_id": r["symbol_key"],
+                "name": r["name"],
+                "qualified_name": r["qualified_name"],
+                "kind": r["kind"],
+                "file": r["file_path"],
+                "lines": [r["start_line"], r["end_line"]],
+                "signature": r["signature"],
+                "depth": r["depth"],
+            }
+            if r["depth"] == 1:
+                direct.append(entry)
+            else:
+                indirect.append(entry)
+
+        return {
+            "symbol": symbol,
+            "target": target_info,
+            "total_found": len(rows),
+            "direct_count": len(direct),
+            "indirect_count": len(indirect),
+            "direct_implementers": direct,
+            "indirect_implementers": indirect if transitive else [],
         }
 
     def read_lines(self, file_path: str, start: int, end: int) -> dict[str, Any]:

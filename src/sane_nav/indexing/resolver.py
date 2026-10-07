@@ -18,7 +18,7 @@ class SymbolResolver:
             # Fetch occurrences
             cur = conn.execute(
                 """
-                SELECT o.id, o.file_id, o.enclosing_symbol_id, o.spelling, o.receiver_text,
+                SELECT o.id, o.file_id, o.enclosing_symbol_id, o.spelling, o.receiver_text, o.role,
                        f.path as file_path
                 FROM occurrences o
                 JOIN files f ON o.file_id = f.id
@@ -31,6 +31,7 @@ class SymbolResolver:
                 occ_id = occ["id"]
                 spelling = occ["spelling"]
                 receiver = occ["receiver_text"]
+                role = occ["role"] or "call"
                 file_id = occ["file_id"]
                 enclosing_id = occ["enclosing_symbol_id"]
 
@@ -90,14 +91,15 @@ class SymbolResolver:
 
                     # Create edge if enclosing symbol is known
                     if enclosing_id:
+                        edge_kind = role if role in ("implements", "extends") else "calls"
                         conn.execute(
                             """
                             INSERT OR REPLACE INTO edges (
                                 source_symbol_id, target_symbol_id, occurrence_id,
                                 kind, resolution_kind, confidence
-                            ) VALUES (?, ?, ?, 'calls', ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?)
                             """,
-                            (enclosing_id, target_id, occ_id, res_kind, confidence),
+                            (enclosing_id, target_id, occ_id, edge_kind, res_kind, confidence),
                         )
                     resolved_count += 1
 

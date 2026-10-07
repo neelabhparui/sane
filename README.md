@@ -6,7 +6,7 @@
 
 > **A local, read-only progressive-disclosure code navigation engine and MCP server for AI coding agents.**
 
-S.A.N.E. turns your repository into a compact navigation graph and exposes a tiny set of Model Context Protocol (MCP) primitives that move an agent from **concept → structure → symbol → implementation → usages** without flooding the context window with raw files.
+S.A.N.E. turns your repository into a compact navigation graph and exposes a tiny set of Model Context Protocol (MCP) primitives that move an agent from **concept → structure → symbol → implementation → usages & hierarchy** without flooding the context window with raw files.
 
 ---
 
@@ -32,6 +32,8 @@ What does that file contain structurally?
 What is the exact implementation of this symbol?
         ↓ find_usages("AuthService.rotate_refresh_token")
 Who calls it / what does it call?
+        ↓ find_implementations("AuthService")
+Who implements or extends this interface/class?
 ```
 
 **Token savings: ~85% reduction** in navigation tokens with 100% precision.
@@ -43,7 +45,7 @@ Who calls it / what does it call?
 - **Multi-Language Structural Indexing**: First-class support for **Python**, **Java**, **Kotlin**, and **Markdown**.
 - **Redacted Source Skeletons**: Preserves docstrings, decorators, annotations, and signatures byte-for-byte while redacting method bodies with minimal markers.
 - **Hierarchical Documentation Fusion**: Parses Markdown headings into navigation trees (`Architecture > Auth > Refresh tokens`) and deterministically bridges docs to code symbols.
-- **Confidence-Aware Reference Resolution**: Distinguishes `exact`, `import-scoped`, `class-scoped`, and `probable` usages with AST-aware snippets and `>` target indicators.
+- **Confidence-Aware Reference & Hierarchy Resolution**: Distinguishes `exact`, `import-scoped`, `class-scoped`, and `probable` usages, and resolves direct and transitive class/interface implementations.
 - **Output Budget Hard Limits**: Every tool response is strictly bounded to prevent unexpected LLM context flooding.
 - **Safe & Local**: 100% local SQLite/WAL storage, no cloud API dependencies, zero repository modifications, strict repository containment.
 
@@ -81,8 +83,11 @@ sane skeleton src/auth.py
 # Extract exact symbol code
 sane symbol "AuthService.rotate_refresh_token"
 
-# Find call sites
+# Find call sites and references
 sane usages "AuthService.rotate_refresh_token"
+
+# Find classes implementing or extending an interface/class
+sane implementations "AdContainer"
 
 # Start MCP stdio server
 sane serve
@@ -157,8 +162,9 @@ Use S.A.N.E. for exploring this repository:
 2. `get_context` when feature-level documentation is needed.
 3. `get_skeleton` before reading an unfamiliar source file.
 4. `get_symbol_code` to view exact implementations.
-5. `find_usages` to trace call sites.
-6. `read_lines` only for non-code or configuration files.
+5. `find_usages` to trace call sites and references.
+6. `find_implementations` to find direct and transitive subclasses or implementers of an interface/class.
+7. `read_lines` only for non-code or configuration files.
 
 Do NOT read entire source files merely to discover their structure.
 ```
@@ -179,17 +185,19 @@ Do NOT read entire source files merely to discover their structure.
               ┌──────────────────▼──────────────────┐
               │          Core Application           │
               │ Search · Skeleton · Symbol · Usages │
-              └───────────────┬─────────────────────┘
+              │      · Type Implementations         │
+              └──────────────────┬──────────────────┘
                               │
                   ┌───────────▼───────────┐
                   │    SQLite (WAL)       │
                   │ Symbols · Docs · FTS5 │
+                  │ Graph Edges & Subtypes│
                   └───────────▲───────────┘
                               │
-              ┌───────────────┴────────────────┐
+              ┌───────────────┴─────────────────┐
               │    Multi-Language Adapters     │
               │ Python · Java · Kotlin · Docs  │
-              └────────────────────────────────┘
+              └─────────────────────────────────┘
 ```
 
 ---
