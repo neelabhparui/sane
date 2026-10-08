@@ -1,0 +1,59 @@
+pyproject.toml
+  s_0724dc05ebe80c::t_e1a2a57df35a63 13-14
+  s_856a60136c1e6e::t_eb2599f33237d9 7
+  s_0724dc05ebe80c::t_cf8c949eddb1d6 11
+src/sane_nav/storage/database.py
+  s_dd63355a34b14d::t_4a81bfa5b11c7d 64,78-82
+  s_dd63355a34b14d::t_6ea1fc58142a3c 176,195-210
+src/sane_nav/cli.py
+  s_856a60136c1e6e::t_5656ba66bdb492 225-228
+  s_856a60136c1e6e::t_3085b804975f41 526-537
+  s_856a60136c1e6e::t_542dfd7bab3f17 34-75,139-180,182,186,189-205,207-224,229-241
+  s_856a60136c1e6e::t_4cddf4164e1e67 183
+  s_856a60136c1e6e::t_a5655966ba016c 30
+  s_856a60136c1e6e::t_e166c48e419a01 76-138
+src/sane_nav/storage/schema.sql
+  s_dd63355a34b14d::t_a508a5601a19c3 55
+src/sane_nav/retrieval/lexical.py
+  s_dd63355a34b14d::t_41f4d6fed8b1e0 118-130
+src/sane_nav/__init__.py
+  s_856a60136c1e6e::t_10b7ec1581900c 5
+src/sane_nav.egg-info/PKG-INFO
+  s_0724dc05ebe80c::t_a592e83e9436a8 42,68-69,81,119,122-124,198-200,221-222,227,230,233
+  s_0724dc05ebe80c::t_55342364e080ae 5
+  s_0724dc05ebe80c::t_9fd32965f27f06 6
+src/sane_nav.egg-info/SOURCES.txt
+  s_0724dc05ebe80c::t_a592e83e9436a8 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "35c81208ea21fd6deb30dd58c4c892bf647021c0",
+  "prompts": {},
+  "sessions": {
+    "s_0724dc05ebe80c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fabdd7e8-695c-4dd6-8a48-e26f03e1add6",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    },
+    "s_856a60136c1e6e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "869d4b8f-0a61-4e32-9ec9-ddfa3fe3222d",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    },
+    "s_dd63355a34b14d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f7cb6a1-f493-440e-880a-751c1ba13827",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    }
+  }
+}
