@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sane-nav"
-version = "0.1.0"
+version = "0.2.1"
 description = "Token-efficient progressive-disclosure semantic code navigation engine and MCP server for AI coding agents"
 readme = "README.md"
 authors = [
-    { name = "S.A.N.E. Contributors" }
+    { name = "neelabhparui" }
 ]
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = [
     "mcp",
@@ -24,7 +25,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

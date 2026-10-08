@@ -115,6 +115,19 @@ class LexicalRetriever:
                             "start_line": drow["start_line"],
                             "end_line": drow["end_line"],
                         })
+                elif r["entity_type"] == "occurrence":
+                    orow = conn.execute(
+                        "SELECT * FROM occurrences WHERE id = ?", (r["entity_id"],)
+                    ).fetchone()
+                    if orow:
+                        item.update({
+                            "spelling": orow["spelling"],
+                            "role": orow["role"],
+                            "receiver_text": orow["receiver_text"],
+                            "resolution_kind": orow["resolution_kind"],
+                            "start_line": orow["start_line"],
+                            "end_line": orow["end_line"],
+                        })
 
                 results.append(item)
 

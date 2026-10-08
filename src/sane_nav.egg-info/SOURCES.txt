@@ -35,4 +35,5 @@ src/sane_nav/retrieval/context.py
 src/sane_nav/retrieval/lexical.py
 src/sane_nav/retrieval/ranking.py
 src/sane_nav/storage/database.py
+tests/test_implementations.py
 tests/test_sane.py

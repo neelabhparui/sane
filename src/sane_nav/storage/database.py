@@ -61,6 +61,7 @@ class Database:
             file_id = row["id"]
             sym_ids = [r["id"] for r in conn.execute("SELECT id FROM symbols WHERE file_id = ?", (file_id,))]
             doc_ids = [r["id"] for r in conn.execute("SELECT id FROM docs WHERE file_id = ?", (file_id,))]
+            occ_ids = [r["id"] for r in conn.execute("SELECT id FROM occurrences WHERE file_id = ?", (file_id,))]
 
             if sym_ids:
                 placeholders = ",".join("?" for _ in sym_ids)
@@ -73,6 +74,12 @@ class Database:
                 conn.execute(
                     f"DELETE FROM search_documents WHERE entity_type = 'doc' AND entity_id IN ({placeholders})",
                     doc_ids,
+                )
+            if occ_ids:
+                placeholders = ",".join("?" for _ in occ_ids)
+                conn.execute(
+                    f"DELETE FROM search_documents WHERE entity_type = 'occurrence' AND entity_id IN ({placeholders})",
+                    occ_ids,
                 )
 
             conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
@@ -166,7 +173,7 @@ class Database:
             # Insert occurrences
             for ref in parsed.references:
                 enc_id = symbol_key_to_id.get(ref.enclosing_symbol_key) if ref.enclosing_symbol_key else None
-                conn.execute(
+                o_cur = conn.execute(
                     """
                     INSERT INTO occurrences (
                         file_id, enclosing_symbol_id, spelling, role, start_byte, end_byte,
@@ -184,6 +191,23 @@ class Database:
                         ref.source_range.end_line,
                         ref.receiver_text,
                     ),
+                )
+                occ_id = o_cur.lastrowid
+
+                # Index call-site spelling in search_documents so lexical search can
+                # find usages, not just declarations (signature/docstring).
+                occ_body = ref.receiver_text or ""
+                sdoc_cur = conn.execute(
+                    """
+                    INSERT INTO search_documents (entity_type, entity_id, title, path, body)
+                    VALUES ('occurrence', ?, ?, ?, ?)
+                    """,
+                    (occ_id, ref.spelling, file_path, occ_body),
+                )
+                doc_rowid = sdoc_cur.lastrowid
+                conn.execute(
+                    "INSERT INTO search_fts (rowid, title, path, body) VALUES (?, ?, ?, ?)",
+                    (doc_rowid, ref.spelling, file_path, occ_body),
                 )
 
             # Insert documentation sections

@@ -27,19 +27,218 @@ BANNER = r"""
   \__ \  / /| | /  |/ /  / __/   
  ___/ / / ___ |/ /|  /  / /___   
 /____/ /_/  |_/_/ |_/  /_____/   
-Semantic Agent Navigation Engine v0.1.0
+Semantic Agent Navigation Engine v0.2.1
 """
 
 
+AGENT_CONFIGS = {
+    "claude": {
+        "path": ".mcp.json",
+        "build": lambda repo_root: {
+            "mcpServers": {
+                "sane": {
+                    "command": "sane",
+                    "args": ["serve", "--repo", str(repo_root)],
+                }
+            }
+        },
+    },
+    "cursor": {
+        "path": ".cursor/mcp.json",
+        "build": lambda repo_root: {
+            "mcpServers": {
+                "sane": {
+                    "command": "sane",
+                    "args": ["serve", "--repo", str(repo_root)],
+                }
+            }
+        },
+    },
+    "vscode": {
+        "path": ".vscode/mcp.json",
+        "build": lambda repo_root: {
+            "mcpServers": {
+                "sane": {
+                    "type": "stdio",
+                    "command": "sane",
+                    "args": ["serve", "--repo", str(repo_root)],
+                }
+            }
+        },
+    },
+    "codex": {
+        "path": ".codex/config.toml",
+        "build": None,
+    },
+}
+
+
+def _checkbox_prompt(options: list[str], prompt: str) -> list[str]:
+    """Interactive multi-select checkbox menu (↑/↓ move, space toggles, enter confirms).
+
+    Falls back to a plain comma-separated text prompt when stdin isn't a TTY
+    or the terminal doesn't support raw mode (e.g. piped input, Windows cmd).
+    """
+    if not sys.stdin.isatty():
+        return []
+
+    try:
+        import termios
+        import tty
+    except ImportError:
+        print(f"\n{prompt}")
+        print(f"  Options: {', '.join(options)} (comma-separated, or blank to skip)")
+        try:
+            answer = input("> ").strip()
+        except EOFError:
+            answer = ""
+        return [a.strip().lower() for a in answer.split(",") if a.strip()]
+
+    selected = [False] * len(options)
+    cursor = 0
+
+    def render(first: bool = False):
+        if not first:
+            sys.stdout.write(f"\x1b[{len(options) + 1}A")
+        sys.stdout.write(f"\r{prompt}\x1b[K\n")
+        for i, opt in enumerate(options):
+            mark = "x" if selected[i] else " "
+            pointer = "›" if i == cursor else " "
+            sys.stdout.write(f"\r{pointer} [{mark}] {opt}\x1b[K\n")
+        sys.stdout.flush()
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    print(f"\n(↑/↓ move, space toggles, enter confirms)")
+    try:
+        tty.setcbreak(fd)
+        render(first=True)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch == "\x1b":
+                ch2 = sys.stdin.read(1)
+                ch3 = sys.stdin.read(1) if ch2 == "[" else ""
+                if ch3 == "A":
+                    cursor = (cursor - 1) % len(options)
+                elif ch3 == "B":
+                    cursor = (cursor + 1) % len(options)
+                render()
+            elif ch == " ":
+                selected[cursor] = not selected[cursor]
+                render()
+            elif ch in ("\r", "\n"):
+                break
+            elif ch == "\x03":
+                raise KeyboardInterrupt
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    return [opt for opt, is_sel in zip(options, selected) if is_sel]
+
+
+def _merge_mcp_json(config_path: Path, snippet: dict) -> None:
+    """Merges a {"mcpServers": {...}} snippet into an existing or new JSON file."""
+    existing: dict = {}
+    if config_path.exists():
+        try:
+            existing = json.loads(config_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    existing.setdefault("mcpServers", {})
+    existing["mcpServers"].update(snippet["mcpServers"])
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+
+
+def _setup_agent(client: str, repo_root: Path) -> None:
+    client = client.lower()
+    if client == "codex":
+        toml_path = repo_root / ".codex" / "config.toml"
+        toml_path.parent.mkdir(parents=True, exist_ok=True)
+        snippet = (
+            f'\n[mcp_servers.sane]\n'
+            f'command = "sane"\n'
+            f'args = ["serve", "--repo", "{repo_root}"]\n'
+        )
+        existing = toml_path.read_text(encoding="utf-8") if toml_path.exists() else ""
+        if "[mcp_servers.sane]" in existing:
+            print(f"  • codex: sane already configured in {toml_path}")
+            return
+        with open(toml_path, "a", encoding="utf-8") as f:
+            f.write(snippet)
+        print(f"  • codex: added sane MCP server to {toml_path}")
+        return
+
+    cfg = AGENT_CONFIGS.get(client)
+    if not cfg:
+        print(f"  • {client}: unsupported, skipped")
+        return
+    config_path = repo_root / cfg["path"]
+    _merge_mcp_json(config_path, cfg["build"](repo_root))
+    print(f"  • {client}: added sane MCP server to {config_path}")
+
+
 def cmd_init(args: argparse.Namespace) -> int:
-    """Initializes a new .sane.toml configuration and updates .gitignore."""
+    """One-shot setup: creates .sane.toml, indexes the repo, and wires up MCP for chosen agents."""
+    print(BANNER)
     repo_root = Path(args.repo).resolve()
     config_path = repo_root / ".sane.toml"
+
     if config_path.exists():
         print(f"S.A.N.E. configuration already exists at {config_path}")
-        return 0
+    else:
+        default_toml = _default_toml()
+        config_path.write_text(default_toml, encoding="utf-8")
+        print(f"Created {config_path}")
 
-    default_toml = """# S.A.N.E. Configuration (.sane.toml)
+        gi = repo_root / ".gitignore"
+        if gi.exists():
+            gi_content = gi.read_text(encoding="utf-8", errors="ignore")
+            if ".sane" not in gi_content:
+                with open(gi, "a", encoding="utf-8") as f:
+                    f.write("\n# S.A.N.E. index directory\n.sane/\n")
+                print("Added '.sane/' to .gitignore")
+
+    print(f"\nIndexing repository at: {repo_root}")
+    paths = RepoPaths(repo_root)
+    db = Database(paths.db_path)
+    indexer = Indexer(paths, db)
+
+    def on_prog(file_path: str, cur: int, total: int):
+        pct = (cur / total) * 100
+        sys.stderr.write(f"\r  [{cur}/{total}] ({pct:.1f}%) Indexing {file_path[:50]:<50}")
+        sys.stderr.flush()
+
+    stats = indexer.index_all(on_progress=on_prog)
+    print("\n")
+    print("✓ Indexing complete!")
+    print(f"  • Total files discovered: {stats['total_files']}")
+    print(f"  • Files parsed & indexed: {stats['indexed_files']}")
+    print(f"  • Resolved references:   {stats['resolved_references']}")
+
+    agents_arg = getattr(args, "agents", None)
+    if agents_arg:
+        selected = [a.strip().lower() for a in agents_arg.split(",") if a.strip()]
+    elif getattr(args, "no_agents", False) or not sys.stdin.isatty():
+        selected = []
+    else:
+        selected = _checkbox_prompt(
+            list(AGENT_CONFIGS.keys()),
+            "Which agents should be configured to use S.A.N.E. via MCP?",
+        )
+
+    if selected:
+        print("\nConfiguring agents:")
+        for client in selected:
+            _setup_agent(client, repo_root)
+
+    print("\n✓ S.A.N.E. is ready. Run 'sane serve --repo .' to start the MCP server manually,")
+    print("  or your configured agent will launch it automatically.")
+    return 0
+
+
+def _default_toml() -> str:
+    return """# S.A.N.E. Configuration (.sane.toml)
 
 [repository]
 respect_gitignore = true
@@ -80,19 +279,6 @@ default_limit = 8
 max_chars = 12000
 max_usages = 20
 """
-    config_path.write_text(default_toml, encoding="utf-8")
-    print(f"Created {config_path}")
-
-    # Offer to add .sane/ to .gitignore
-    gi = repo_root / ".gitignore"
-    if gi.exists():
-        gi_content = gi.read_text(encoding="utf-8", errors="ignore")
-        if ".sane" not in gi_content:
-            with open(gi, "a", encoding="utf-8") as f:
-                f.write("\n# S.A.N.E. index directory\n.sane/\n")
-            print("Added '.sane/' to .gitignore")
-
-    return 0
 
 
 def cmd_index(args: argparse.Namespace) -> int:
@@ -337,7 +523,18 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # sane init
-    subparsers.add_parser("init", parents=[repo_parent], help="Initialize .sane.toml configuration")
+    p_init = subparsers.add_parser(
+        "init", parents=[repo_parent],
+        help="One-shot setup: create .sane.toml, index the repo, and configure MCP for agents",
+    )
+    p_init.add_argument(
+        "--agents", default=None,
+        help="Comma-separated agents to configure (claude,codex,cursor,vscode); skips the interactive prompt",
+    )
+    p_init.add_argument(
+        "--no-agents", action="store_true",
+        help="Skip agent configuration entirely (no prompt)",
+    )
 
     # sane index
     subparsers.add_parser("index", parents=[repo_parent], help="Index or incrementally refresh repository")

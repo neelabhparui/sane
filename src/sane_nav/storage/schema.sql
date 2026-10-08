@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS occurrences (
     end_byte             INTEGER NOT NULL,
     start_line           INTEGER NOT NULL,
     end_line             INTEGER NOT NULL,
-    target_symbol_id     INTEGER REFERENCES symbols(id),
+    target_symbol_id     INTEGER REFERENCES symbols(id) ON DELETE SET NULL,
     receiver_text        TEXT,
     resolution_kind      TEXT NOT NULL DEFAULT 'unresolved',
     confidence           REAL
