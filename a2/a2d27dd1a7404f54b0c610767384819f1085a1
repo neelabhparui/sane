@@ -1,0 +1,9 @@
+.github/workflows/pylint.yml
+  ai_agent 10,14,20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "a2a2d27dd1a7404f54b0c610767384819f1085a1",
+  "prompts": {}
+}
