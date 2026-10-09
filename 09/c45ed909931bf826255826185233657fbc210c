@@ -1,0 +1,31 @@
+.github/workflows/python-app.yml
+  ai_agent 1-38
+src/sane_nav/paths.py
+  ai_agent 87
+tests/test_flow.py
+  ai_agent 2
+uv.lock
+  ai_agent 492-504,968-976,1117-1125,1577,1586,1603,1613
+tests/conftest.py
+  ai_agent 1-7
+tests/test_mcp_edge_cases.py
+  ai_agent 1-192
+tests/test_impact.py
+  ai_agent 2
+tests/test_indexing_and_storage.py
+  ai_agent 1-205
+tests/test_parsing_adapters.py
+  ai_agent 1-203
+tests/test_core.py
+  ai_agent 1-257
+tests/test_cli.py
+  ai_agent 1-277
+pyproject.toml
+  ai_agent 41,58,71-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "09c45ed909931bf826255826185233657fbc210c",
+  "prompts": {}
+}
