@@ -1,0 +1,11 @@
+.github/workflows/publish.yml
+  ai_agent 1-39
+.github/CODEOWNERS
+  ai_agent 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "8485c27ae2965602c2ee1246aeab8acc36e417c3",
+  "prompts": {}
+}
