@@ -1,0 +1,62 @@
+name: Dependency Check
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Run weekly every Monday at 00:00 UTC to catch newly disclosed vulnerabilities
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pip-audit:
+    name: Audit Python Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify uv.lock integrity
+        run: uv lock --check
+
+      - name: Install dependencies (including optional & dev)
+        run: uv sync --all-extras --dev
+
+      - name: Run pip-audit vulnerability scanner
+        run: |
+          set -o pipefail
+          uv run --with pip-audit pip-audit --desc on -f markdown | tee "$GITHUB_STEP_SUMMARY"
+
+  dependency-review:
+    name: GitHub Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        # Note: Dependency graph must be enabled in repo Settings -> Code security and analysis.
+        # We set continue-on-error to true so the workflow remains non-blocking if Dependency Graph
+        # is disabled or pending indexing on the repository.
+        continue-on-error: true
+        with:
+          comment-summary-in-pr: always
+          fail-on-severity: moderate
