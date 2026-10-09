@@ -6,3 +6,24 @@ coverage/
 *.log
 .env*
 !.env.example
+.plans/
+
+# Python / bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+
+# S.A.N.E. Local Indexes & DB
+.sane/
+
+# IDE / Tool configs
+.idea/
+.vscode/
+.serena/
+.mcp.json

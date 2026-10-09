@@ -1,0 +1,11 @@
+S.A.N.E. (Semantic Agent Navigation Engine)
+Copyright (c) S.A.N.E. Contributors
+
+This component includes queries and query patterns adapted from Aider (https://github.com/paul-gauthier/aider),
+licensed under the Apache License, Version 2.0.
+Copyright (c) Paul Gauthier.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0

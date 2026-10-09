@@ -3,9 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, Optional
 
 from sane_nav.indexing.incremental import IncrementalSync
+
+try:
+    from watchfiles import awatch
+except ImportError:
+    awatch = None  # type: ignore
 
 logger = logging.getLogger("sane_nav.watcher")
 
@@ -19,18 +23,16 @@ class RepoWatcher:
 
     async def start(self) -> None:
         self._running = True
-        try:
-            from watchfiles import awatch
-
+        if awatch is not None:
             logger.info(f"Started watchfiles on {self.repo_root}")
             async for changes in awatch(self.repo_root, debounce=self.debounce_ms):
                 if not self._running:
                     break
-                for change_type, path_str in changes:
+                for _, path_str in changes:
                     if ".sane" in path_str or ".git" in path_str:
                         continue
                     self.sync.sync_changed_path(path_str)
-        except ImportError:
+        else:
             logger.info("watchfiles not installed; watcher running in periodic polling fallback mode.")
             while self._running:
                 await asyncio.sleep(self.debounce_ms / 1000.0 * 10)

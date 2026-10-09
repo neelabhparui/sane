@@ -25,12 +25,15 @@ class HybridRanker:
             scores[key] = scores.get(key, 0.0) + rrf
             reasons[key] = "exact_symbol_match"
 
-        # Score FTS results (Weight: 1.0)
+        # Score FTS results (Weight: 1.0, except 'occurrence' rows which are
+        # single call-site mentions and get down-weighted to avoid short-document
+        # BM25 bias drowning out actual declarations/docs).
         for rank, item in enumerate(fts_results):
             key = item.get("symbol_key") or f"{item['file_path']}::{item['title']}"
             if key not in items:
                 items[key] = item
-            rrf = 1.0 / (60.0 + rank + 1)
+            weight = 0.3 if item.get("entity_type") == "occurrence" else 1.0
+            rrf = weight / (60.0 + rank + 1)
             scores[key] = scores.get(key, 0.0) + rrf
 
             # Add bonus if title or signature directly mentions query tokens

@@ -4,6 +4,7 @@ import re
 from typing import Optional
 
 from sane_nav.core.ids import build_symbol_key
+from sane_nav.parsing.brace_matching import find_matching_brace
 from sane_nav.core.models import (
     ParsedFile,
     ParsedReference,
@@ -89,7 +90,7 @@ class KotlinAdapter:
             re.MULTILINE,
         )
         fun_tail_regex = re.compile(
-            r"\s*(?::\s*([A-Za-z0-9_<>, \?\.\/\[\]]+))?\s*(\{|=\s*)"
+            r"\s*(?::\s*([A-Za-z0-9_<>, \?\.\/\[\]]+))?\s*(\{|=\s*|(?=[\r\n;]|$))"
         )
 
         def extract_kdoc(byte_pos: int) -> Optional[str]:
@@ -179,15 +180,7 @@ class KotlinAdapter:
 
             has_brace = idx < len(source_text) and source_text[idx] == "{"
             if has_brace:
-                brace_count = 1
-                idx += 1
-                while idx < len(source_text) and brace_count > 0:
-                    if source_text[idx] == "{":
-                        brace_count += 1
-                    elif source_text[idx] == "}":
-                        brace_count -= 1
-                    idx += 1
-                end_pos = idx
+                end_pos = find_matching_brace(source_text, idx + 1)
             else:
                 end_pos = header_end
 
@@ -248,22 +241,25 @@ class KotlinAdapter:
                 continue
             body_opener = tail_match.group(2).strip()
 
+            # The regex's leading `\s*`/annotation-or-modifier group can match
+            # zero-width, leaving m.start() on whitespace (e.g. a blank line
+            # or trailing newline from a preceding doc comment) rather than
+            # on the declaration itself — skip past any such leading
+            # whitespace so start_line lands on the real first line.
             start_pos = m.start()
+            while start_pos < m.end() and source_text[start_pos].isspace():
+                start_pos += 1
             start_line = source_text[:start_pos].count("\n") + 1
             sig = source_text[start_pos : tail_match.end() - (1 if body_opener == "{" else 0)].strip()
 
             header_end = tail_match.end()
             if body_opener == "{":
-                brace_count = 1
-                idx = header_end
-                while idx < len(source_text) and brace_count > 0:
-                    if source_text[idx] == "{":
-                        brace_count += 1
-                    elif source_text[idx] == "}":
-                        brace_count -= 1
-                    idx += 1
-                end_pos = idx
+                end_pos = find_matching_brace(source_text, header_end)
                 body_start = header_end - 1
+            elif body_opener == "":
+                # Abstract/interface method with no body (ends at ';'/newline/EOF)
+                end_pos = header_end
+                body_start = None
             else:
                 line_end = source_text.find("\n", header_end)
                 end_pos = line_end if line_end != -1 else len(source_text)
@@ -271,7 +267,11 @@ class KotlinAdapter:
 
             end_line = source_text[:end_pos].count("\n") + 1
             full_range = SourceRange(start_pos, end_pos, start_line, end_line)
-            body_range = SourceRange(body_start, end_pos, source_text[:body_start].count("\n") + 1, end_line)
+            body_range = (
+                SourceRange(body_start, end_pos, source_text[:body_start].count("\n") + 1, end_line)
+                if body_start is not None
+                else None
+            )
 
             enclosing_class = None
             for cs in class_symbols:

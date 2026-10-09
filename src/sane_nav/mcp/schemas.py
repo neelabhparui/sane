@@ -5,14 +5,21 @@ from typing import Any
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "search_semantic",
-        "description": "Searches repository symbols and documentation by concept or identifier. Returns concise candidates with file paths, signatures, line numbers, and match reasons.",
+        "description": (
+            "Searches symbols, docs, call-site occurrences, and file paths by concept, "
+            "identifier, or bare filename (e.g. 'AudioUnifiedAdManager' finds that file "
+            "even with no docstring match). Works best with 1-3 sharp tokens (a real "
+            "identifier/class name) — a long natural-language phrase dilutes relevance, "
+            "so narrow the query to the most literal term if results look off-topic."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Concept, feature description, or identifier to search for."},
+                "query": {"type": "string", "description": "Concept, identifier, or bare filename. Prefer short literal identifiers over long phrases."},
                 "path_prefix": {"type": "string", "description": "Optional subdirectory prefix to limit search."},
-                "kinds": {"type": "array", "items": {"type": "string"}, "description": "Optional list of symbol kinds (function, method, class, doc)."},
+                "kinds": {"type": "array", "items": {"type": "string"}, "description": "Optional list of symbol kinds (function, method, class, doc, file)."},
                 "limit": {"type": "integer", "description": "Maximum number of candidates to return (default: 8)."},
+                "context_symbol": {"type": "string", "description": "Optional symbol name/id or file path you are currently looking at. Results closer to it in the call graph (calls/implements/extends) are boosted over name-match alone — e.g. after reading UnifiedAdManager.kt, searching 'finish' with context_symbol='UnifiedAdManager' ranks nearby logger.finish() calls above unrelated Activity.finish() in test files."},
             },
             "required": ["query"],
         },
@@ -44,25 +51,31 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "get_symbol_code",
-        "description": "Retrieves the exact code declaration and implementation body for a specific symbol without reading the entire file.",
+        "description": "Retrieves the exact code declaration and implementation body for a known symbol name without reading the entire file.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "symbol": {"type": "string", "description": "Symbol name (e.g. 'AuthService.validateToken') or canonical symbol URI."},
                 "context_lines": {"type": "integer", "description": "Additional surrounding lines of context (default: 0)."},
+                "kind": {"type": "string", "description": "Optional symbol kind filter to disambiguate a common name (e.g. 'method', 'field', 'class')."},
+                "class_context": {"type": "string", "description": "Optional owning class/type name to disambiguate a common method/field name (e.g. symbol='finish', class_context='InMobiLogger')."},
+                "force": {"type": "boolean", "description": "Bypass session deduplication and force verbatim code re-emission (default: false)."},
             },
             "required": ["symbol"],
         },
     },
     {
         "name": "find_usages",
-        "description": "Finds call sites and references to a symbol across the repository, returning AST-aware code previews with line numbers and resolution confidence.",
+        "description": "Finds every call site / reference to a known symbol across the repository, with line numbers and resolution confidence.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "symbol": {"type": "string", "description": "Target symbol name or qualified name."},
+                "symbol": {"type": "string", "description": "Target symbol name or qualified name. For a common/generic method name (e.g. 'finish', 'close'), qualify it as 'Owner.method' (e.g. 'AdContainer.finish') to scope matches to that receiver and avoid noise from unrelated classes, or use kind/class_context instead."},
                 "limit": {"type": "integer", "description": "Maximum number of usages to return (default: 10)."},
                 "include_probable": {"type": "boolean", "description": "Whether to include probable heuristic matches (default: true)."},
+                "kind": {"type": "string", "description": "Optional symbol kind filter for the target (e.g. 'method', 'field', 'class')."},
+                "class_context": {"type": "string", "description": "Optional owning class/type name to scope matches to (e.g. symbol='finish', class_context='InMobiLogger'). Composable with the 'Owner.method' dotted form."},
+                "min_confidence": {"type": "number", "description": "Optional lower bound (0.0-1.0) on resolution confidence. Set to 0.9 to see only exact, unambiguous usages and skip reading through probable/heuristic matches."},
             },
             "required": ["symbol"],
         },
@@ -77,6 +90,48 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "transitive": {"type": "boolean", "description": "Whether to recursively include indirect implementers / subclasses (default: true)."},
             },
             "required": ["symbol"],
+        },
+    },
+    {
+        "name": "explore_flow",
+        "description": "One-shot surgical flow exploration. Locates anchor symbol, extracts verbatim body, queries outbound calls (callees), inbound callers, and matching documentation into a compact, high-signal composite response under budget.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Target symbol name, qualified name, or symbol key (e.g. 'PaymentRetryCoordinator.should_retry')."},
+                "max_depth": {"type": "integer", "description": "Call graph traversal depth for outbound callees (default: 1, max: 2)."},
+                "max_chars": {"type": "integer", "description": "Output budget limit in characters (default: 12000)."},
+                "force": {"type": "boolean", "description": "Bypass session deduplication and force verbatim code re-emission (default: false)."},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "analyze_impact",
+        "description": "Transitive blast radius and refactor safety analysis. Discovers upstream callers up to depth N, direct and indirect interface/subclass implementers, and affected test suites before modifying code.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Target symbol name, qualified name, or symbol key."},
+                "depth": {"type": "integer", "description": "Upstream caller recursion depth (default: 2, max: 4)."},
+                "include_tests": {"type": "boolean", "description": "Whether to search and report affected test suites (default: true)."},
+                "max_chars": {"type": "integer", "description": "Output budget limit in characters (default: 12000)."},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "read_file_structural",
+        "description": "Drop-in file reader that attaches structural architectural context (declared symbols, upstream callers/dependents, linked documentation) to exact numbered lines so follow-up queries are unnecessary.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Repository-relative file path."},
+                "start": {"type": "integer", "description": "1-based starting line number (default: 1)."},
+                "end": {"type": "integer", "description": "1-based ending line number (default: up to 150 lines or file end)."},
+                "max_chars": {"type": "integer", "description": "Output budget limit in characters (default: 12000)."},
+            },
+            "required": ["file_path"],
         },
     },
     {

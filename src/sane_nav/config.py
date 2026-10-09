@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 try:
     import tomllib  # Python 3.11+
@@ -88,7 +87,7 @@ class SaneConfig:
             return cls()
 
     @classmethod
-    def _load_simple(cls, config_file: Path) -> "SaneConfig":
+    def _load_simple(cls, _config_file: Path) -> "SaneConfig":
         # Basic key-value parser for simple toml files
         return cls()
 

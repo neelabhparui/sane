@@ -1,2 +1,0 @@
-[console_scripts]
-sane = sane_nav.cli:main

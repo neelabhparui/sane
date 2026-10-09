@@ -59,7 +59,7 @@ def parse_symbol_query(query: str) -> dict[str, Optional[str]]:
     query = query.strip()
     if "://" in query:
         lang, rest = query.split("://", 1)
-        path_and_owner, sep, name_and_sig = rest.rpartition("#")
+        path_and_owner, _, name_and_sig = rest.rpartition("#")
         return {
             "language": lang,
             "path_or_owner": path_and_owner,

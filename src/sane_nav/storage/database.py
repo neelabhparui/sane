@@ -6,18 +6,13 @@ syntactic occurrences, resolved edges, and hierarchical documentation sections.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
-from sane_nav.core.models import (
-    ParsedDocumentSection,
-    ParsedFile,
-    ParsedReference,
-    ParsedSymbol,
-    SourceRange,
-)
+from sane_nav.core.models import ParsedFile
 
 
 class Database:
@@ -263,6 +258,16 @@ class Database:
             cur = conn.execute("SELECT * FROM files WHERE path = ?", (file_path,))
             return cur.fetchone()
 
+    def search_files_by_name(self, term: str, limit: int = 10) -> list[sqlite3.Row]:
+        """Finds indexed files whose path contains the given term (filename glob-style lookup)."""
+        with self.get_connection() as conn:
+            like_pat = f"%{term}%"
+            cur = conn.execute(
+                "SELECT * FROM files WHERE path LIKE ? ORDER BY length(path) ASC LIMIT ?",
+                (like_pat, limit),
+            )
+            return cur.fetchall()
+
     def list_files(self) -> list[sqlite3.Row]:
         """Lists all indexed files in alphabetical order."""
         with self.get_connection() as conn:
@@ -270,12 +275,24 @@ class Database:
             return cur.fetchall()
 
     def get_symbol_by_id_or_name(self, query: str) -> list[sqlite3.Row]:
-        """Searches symbols by symbol key, qualified name, or short name."""
+        """Searches symbols by symbol key, qualified name, or short name.
+
+        Tolerates a trailing parameter list (e.g. "Foo.bar(String, int)") and
+        a trailing "@L<line>" location suffix by stripping both before
+        matching, since a guessed symbol_id's line anchor is often stale by
+        the time it's reused. Falls back to a short-name fuzzy match so
+        callers get candidates instead of a silent not-found when the
+        guessed signature/location doesn't line up with the indexed
+        representation.
+        """
+        normalized = re.sub(r"\([^)]*\)\s*$", "", query).strip()
+        normalized = re.sub(r"@L\d+\s*$", "", normalized).strip()
+
         with self.get_connection() as conn:
             # 1. Exact symbol_key match
             cur = conn.execute(
                 "SELECT s.*, f.path as file_path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.symbol_key = ?",
-                (query,),
+                (normalized,),
             )
             rows = cur.fetchall()
             if rows:
@@ -284,7 +301,7 @@ class Database:
             # 2. Exact qualified_name match
             cur = conn.execute(
                 "SELECT s.*, f.path as file_path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.qualified_name = ?",
-                (query,),
+                (normalized,),
             )
             rows = cur.fetchall()
             if rows:
@@ -293,7 +310,7 @@ class Database:
             # 3. Exact short name match
             cur = conn.execute(
                 "SELECT s.*, f.path as file_path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name = ?",
-                (query,),
+                (normalized,),
             )
             rows = cur.fetchall()
             if rows:
@@ -306,9 +323,26 @@ class Database:
                 JOIN files f ON s.file_id = f.id
                 WHERE s.qualified_name LIKE ? OR s.symbol_key LIKE ?
                 """,
-                (f"%{query}", f"%{query}%"),
+                (f"%{normalized}", f"%{normalized}%"),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+            if rows:
+                return rows
+
+            # 5. Fuzzy fallback on bare short name (last dotted segment), so a
+            # guessed full signature still surfaces candidates rather than
+            # failing silently.
+            bare_name = normalized.rsplit(".", 1)[-1]
+            if bare_name and bare_name != normalized:
+                cur = conn.execute(
+                    "SELECT s.*, f.path as file_path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name = ?",
+                    (bare_name,),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    return rows
+
+            return []
 
     def get_file_symbols(self, file_path: str) -> list[sqlite3.Row]:
         """Fetches all symbols declared in a given file ordered by line."""
@@ -359,6 +393,46 @@ class Database:
             cur = conn.execute(sql, params)
             return cur.fetchall()
 
+    def get_graph_proximity(
+        self,
+        seed_symbol_ids: list[int],
+        max_depth: int = 3,
+    ) -> dict[int, int]:
+        """Computes shortest-path distance (in edge hops) from any seed symbol
+        to every symbol reachable within max_depth, traversing the `edges`
+        table (calls/implements/extends) in both directions.
+
+        Used to rerank results by how close they are to a symbol/file the
+        caller is already looking at, rather than by name match alone.
+
+        Returns:
+            Dict mapping symbol id -> minimum hop distance from any seed (0 for seeds themselves).
+        """
+        if not seed_symbol_ids:
+            return {}
+
+        with self.get_connection() as conn:
+            seed_values = ",".join("(?)" for _ in seed_symbol_ids)
+            sql = f"""
+                WITH RECURSIVE seeds(sym_id) AS (
+                    VALUES {seed_values}
+                ),
+                proximity(sym_id, depth) AS (
+                    SELECT sym_id, 0 FROM seeds
+                    UNION
+                    SELECT
+                        CASE WHEN e.source_symbol_id = p.sym_id THEN e.target_symbol_id ELSE e.source_symbol_id END,
+                        p.depth + 1
+                    FROM edges e
+                    JOIN proximity p
+                        ON e.source_symbol_id = p.sym_id OR e.target_symbol_id = p.sym_id
+                    WHERE p.depth < ?
+                )
+                SELECT sym_id, MIN(depth) as depth FROM proximity GROUP BY sym_id
+            """
+            cur = conn.execute(sql, (*seed_symbol_ids, max_depth))
+            return {row["sym_id"]: row["depth"] for row in cur.fetchall() if row["sym_id"] is not None}
+
     def get_stats(self) -> dict[str, Any]:
         """Returns health metrics, counts, and language distribution."""
         with self.get_connection() as conn:
@@ -383,3 +457,223 @@ class Database:
                 "languages": languages,
                 "semantic_mode": "lexical-structural",
             }
+
+    def get_upstream_callers(
+        self,
+        symbol_ids: int | list[int],
+        max_depth: int = 2,
+    ) -> list[sqlite3.Row]:
+        """Finds all direct and transitive upstream callers of symbol(s) up to max_depth."""
+        if isinstance(symbol_ids, int):
+            target_ids = [symbol_ids]
+        else:
+            target_ids = list(symbol_ids)
+
+        if not target_ids:
+            return []
+
+        depth_limit = max(1, min(max_depth, 4))
+        placeholders = ",".join("?" for _ in target_ids)
+
+        with self.get_connection() as conn:
+            sql = f"""
+            WITH RECURSIVE upstream_graph(caller_id, callee_id, depth) AS (
+                -- Direct callers (depth 1)
+                SELECT e.source_symbol_id, e.target_symbol_id, 1
+                FROM edges e
+                WHERE e.target_symbol_id IN ({placeholders}) AND e.kind = 'calls'
+                UNION
+                -- Transitive callers (depth + 1)
+                SELECT e.source_symbol_id, e.target_symbol_id, g.depth + 1
+                FROM edges e
+                JOIN upstream_graph g ON e.target_symbol_id = g.caller_id
+                WHERE e.kind = 'calls' AND g.depth < ?
+            )
+            SELECT
+                s.id, s.symbol_key, s.name, s.qualified_name, s.kind, s.signature,
+                s.docstring, s.start_line, s.end_line, f.path as file_path,
+                MIN(g.depth) as depth, g.callee_id
+            FROM upstream_graph g
+            JOIN symbols s ON g.caller_id = s.id
+            JOIN files f ON s.file_id = f.id
+            GROUP BY s.id
+            ORDER BY depth ASC, s.name ASC;
+            """
+            params = [*target_ids, depth_limit]
+            cur = conn.execute(sql, params)
+            return cur.fetchall()
+
+    def get_downstream_callees(
+        self,
+        symbol_ids: int | list[int],
+        max_depth: int = 1,
+    ) -> list[sqlite3.Row]:
+        """Finds all direct (and optionally transitive) downstream callees invoked by symbol(s)."""
+        if isinstance(symbol_ids, int):
+            source_ids = [symbol_ids]
+        else:
+            source_ids = list(symbol_ids)
+
+        if not source_ids:
+            return []
+
+        depth_limit = max(1, min(max_depth, 4))
+        placeholders = ",".join("?" for _ in source_ids)
+
+        with self.get_connection() as conn:
+            sql = f"""
+            WITH RECURSIVE downstream_graph(caller_id, callee_id, depth) AS (
+                -- Direct callees (depth 1)
+                SELECT e.source_symbol_id, e.target_symbol_id, 1
+                FROM edges e
+                WHERE e.source_symbol_id IN ({placeholders})
+                  AND e.target_symbol_id IS NOT NULL
+                  AND e.kind = 'calls'
+                UNION
+                -- Transitive callees (depth + 1)
+                SELECT e.source_symbol_id, e.target_symbol_id, g.depth + 1
+                FROM edges e
+                JOIN downstream_graph g ON e.source_symbol_id = g.callee_id
+                WHERE e.target_symbol_id IS NOT NULL
+                  AND e.kind = 'calls'
+                  AND g.depth < ?
+            )
+            SELECT
+                s.id, s.symbol_key, s.name, s.qualified_name, s.kind, s.signature,
+                s.docstring, s.start_line, s.end_line, f.path as file_path,
+                MIN(g.depth) as depth, g.caller_id
+            FROM downstream_graph g
+            JOIN symbols s ON g.callee_id = s.id
+            JOIN files f ON s.file_id = f.id
+            GROUP BY s.id
+            ORDER BY depth ASC, s.name ASC;
+            """
+            params = [*source_ids, depth_limit]
+            cur = conn.execute(sql, params)
+            return cur.fetchall()
+
+    def get_affected_tests(
+        self,
+        symbol_ids: int | list[int],
+    ) -> list[sqlite3.Row]:
+        """Finds test suite references and occurrences affected by target symbol(s)."""
+        if isinstance(symbol_ids, int):
+            target_ids = [symbol_ids]
+        else:
+            target_ids = list(symbol_ids)
+
+        if not target_ids:
+            return []
+
+        placeholders = ",".join("?" for _ in target_ids)
+
+        with self.get_connection() as conn:
+            sql = f"""
+            SELECT DISTINCT
+                f.path as file_path,
+                o.start_line,
+                o.end_line,
+                o.spelling,
+                o.role,
+                o.confidence,
+                o.resolution_kind,
+                s_target.id as target_symbol_id,
+                s_target.name as target_symbol_name,
+                s_target.symbol_key as target_symbol_key,
+                s_enc.id as enclosing_symbol_id,
+                s_enc.name as test_suite_or_method,
+                s_enc.kind as enclosing_kind
+            FROM occurrences o
+            JOIN files f ON o.file_id = f.id
+            LEFT JOIN symbols s_target ON o.target_symbol_id = s_target.id
+            LEFT JOIN symbols s_enc ON o.enclosing_symbol_id = s_enc.id
+            WHERE (
+                o.target_symbol_id IN ({placeholders})
+                OR (
+                    o.target_symbol_id IS NULL
+                    AND o.spelling IN (
+                        SELECT name FROM symbols WHERE id IN ({placeholders})
+                    )
+                )
+            )
+            AND (
+                f.path LIKE '%/tests/%'
+                OR f.path LIKE '%/test/%'
+                OR f.path LIKE 'tests/%'
+                OR f.path LIKE 'test/%'
+                OR f.path LIKE '%Test.%'
+                OR f.path LIKE '%Tests.%'
+                OR f.path LIKE '%Spec.%'
+                OR f.path LIKE '%_test.%'
+                OR f.path LIKE '%test_%'
+            )
+            ORDER BY f.path ASC, o.start_line ASC;
+            """
+            params = [*target_ids, *target_ids]
+            cur = conn.execute(sql, params)
+            return cur.fetchall()
+
+    def get_file_dependents(self, file_path: str) -> list[str]:
+        """Finds all indexed files that call or reference symbols declared in file_path."""
+        with self.get_connection() as conn:
+            sql = """
+            SELECT DISTINCT f_caller.path
+            FROM edges e
+            JOIN symbols s_target ON e.target_symbol_id = s_target.id
+            JOIN files f_target ON s_target.file_id = f_target.id
+            JOIN symbols s_caller ON e.source_symbol_id = s_caller.id
+            JOIN files f_caller ON s_caller.file_id = f_caller.id
+            WHERE f_target.path = ? AND f_caller.path != ?
+            UNION
+            SELECT DISTINCT f_occ.path
+            FROM occurrences o
+            JOIN symbols s_target ON o.target_symbol_id = s_target.id
+            JOIN files f_target ON s_target.file_id = f_target.id
+            JOIN files f_occ ON o.file_id = f_occ.id
+            WHERE f_target.path = ? AND f_occ.path != ?
+            ORDER BY 1 ASC;
+            """
+            cur = conn.execute(sql, (file_path, file_path, file_path, file_path))
+            return [row["path"] for row in cur.fetchall()]
+
+    def get_linked_docs(
+        self,
+        symbol_names: list[str],
+        file_path: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[sqlite3.Row]:
+        """Finds markdown documentation sections matching symbol names or file path."""
+        if not symbol_names and not file_path:
+            return []
+
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        for name in symbol_names:
+            if not name:
+                continue
+            conditions.append("d.heading LIKE ? OR d.content LIKE ?")
+            params.extend([f"%{name}%", f"%{name}%"])
+
+        if file_path:
+            stem = Path(file_path).stem
+            conditions.append("d.heading LIKE ? OR d.content LIKE ?")
+            params.extend([f"%{stem}%", f"%{file_path}%"])
+
+        if not conditions:
+            return []
+
+        where_clause = " OR ".join(conditions)
+        sql = f"""
+        SELECT d.*, f.path as file_path
+        FROM docs d
+        JOIN files f ON d.file_id = f.id
+        WHERE ({where_clause})
+        ORDER BY d.heading_level ASC, length(d.content) DESC
+        LIMIT ?
+        """
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            cur = conn.execute(sql, params)
+            return cur.fetchall()

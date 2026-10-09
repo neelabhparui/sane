@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
-
-from sane_nav.core.models import OutputBudget
+from typing import Optional
 from sane_nav.rendering.budget import BudgetManager
 from sane_nav.retrieval.lexical import LexicalRetriever
 from sane_nav.storage.database import Database

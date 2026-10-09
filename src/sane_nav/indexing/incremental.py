@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from sane_nav.indexing.indexer import Indexer
-from sane_nav.paths import RepoPaths
 
 logger = logging.getLogger("sane_nav.incremental")
 

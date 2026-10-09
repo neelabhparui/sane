@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from typing import Any, Optional
 
 from sane_nav.core.ids import normalize_identifier_tokens
@@ -38,10 +39,16 @@ class LexicalRetriever:
         if not tokens:
             tokens = [re.sub(r"[^\w]", "", query)]
 
-        # SQLite FTS5 query: prefix tokens e.g. "rotate* OR refresh*"
+        # SQLite FTS5 query: prefix tokens, e.g. "rotate* OR refresh*". For
+        # multi-word queries (3+ tokens) require at least half to actually
+        # appear in the matched row (post-filtered below), since fts5 MATCH
+        # with OR alone lets a single rare token match drown out relevance.
         fts_query = " OR ".join(f'"{t}"*' for t in tokens if t)
         if not fts_query:
             fts_query = query
+        min_token_matches = 1
+        if len(tokens) >= 3:
+            min_token_matches = (len(tokens) + 1) // 2
 
         with self.db.get_connection() as conn:
             try:
@@ -58,10 +65,20 @@ class LexicalRetriever:
                     params.append(f"{path_prefix}%")
 
                 sql += " ORDER BY rank LIMIT ?"
-                params.append(limit)
+                # Over-fetch when we need to post-filter by token overlap, since
+                # fts5 MATCH with OR can't express a minimum-match-count directly.
+                fetch_limit = limit * 6 if min_token_matches > 1 else limit
+                params.append(fetch_limit)
 
                 cursor = conn.execute(sql, params)
                 rows = cursor.fetchall()
+
+                if min_token_matches > 1:
+                    def token_overlap(row: sqlite3.Row) -> int:
+                        haystack = f"{row['title'] or ''} {row['body'] or ''}".lower()
+                        return sum(1 for t in tokens if t and t in haystack)
+
+                    rows = [r for r in rows if token_overlap(r) >= min_token_matches][:limit]
             except Exception:
                 # Fallback to simple LIKE if FTS expression has syntax quirks
                 like_pat = f"%{query}%"

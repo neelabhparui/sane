@@ -4,6 +4,7 @@ import re
 from typing import Optional
 
 from sane_nav.core.ids import build_symbol_key
+from sane_nav.parsing.brace_matching import find_matching_brace
 from sane_nav.core.models import (
     ParsedFile,
     ParsedReference,
@@ -19,20 +20,10 @@ class JavaAdapter:
     def supports(self, path: str) -> bool:
         return path.endswith(".java")
 
-    def _get_line_byte_offsets(self, source_bytes: bytes) -> list[int]:
-        offsets = [0]
-        cur = 0
-        for line in source_bytes.splitlines(keepends=True):
-            cur += len(line)
-            offsets.append(cur)
-        return offsets
-
     def parse(self, path: str, source: bytes) -> ParsedFile:
         symbols: list[ParsedSymbol] = []
         references: list[ParsedReference] = []
         source_text = source.decode("utf-8", errors="replace")
-        line_offsets = self._get_line_byte_offsets(source)
-        lines = source_text.splitlines()
 
         # Find package
         package_name = ""
@@ -49,7 +40,7 @@ class JavaAdapter:
         # Regex for methods:
         # annotations?, visibility modifiers?, return type, name, (params), throws?
         method_regex = re.compile(
-            r"((?:@\w+(?:\([^)]*\))?\s+)*(?:public|protected|private|static|final|synchronized|abstract|default)?\s*([A-Za-z0-9_<>, \.\[\]]+)\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)(?:\s*throws\s+[^{;]+)?)\s*(\{)",
+            r"((?:@\w+(?:\([^)]*\))?\s+)*(?:public|protected|private|static|final|synchronized|abstract|default)?\s*([A-Za-z0-9_<>, \.\[\]]+)\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)(?:\s*throws\s+[^{;]+)?)\s*(\{|;)",
             re.MULTILINE,
         )
 
@@ -80,15 +71,7 @@ class JavaAdapter:
             start_line = source_text[:start_pos].count("\n") + 1
 
             # Match closing brace for class
-            brace_count = 1
-            idx = m.end()
-            while idx < len(source_text) and brace_count > 0:
-                if source_text[idx] == "{":
-                    brace_count += 1
-                elif source_text[idx] == "}":
-                    brace_count -= 1
-                idx += 1
-            end_pos = idx
+            end_pos = find_matching_brace(source_text, m.end())
             end_line = source_text[:end_pos].count("\n") + 1
 
             full_range = SourceRange(start_pos, end_pos, start_line, end_line)
@@ -150,30 +133,35 @@ class JavaAdapter:
         # Match methods inside classes
         for m in method_regex.finditer(source_text):
             sig = m.group(1).strip()
-            ret_type = m.group(2).strip()
             m_name = m.group(3)
             params = m.group(4).strip()
+            # The regex's leading annotation/modifier group can match
+            # zero-width, leaving m.start() on whitespace (e.g. a blank line)
+            # rather than the declaration itself — skip past it so start_line
+            # lands on the real first line.
             start_pos = m.start()
+            while start_pos < m.end() and source_text[start_pos].isspace():
+                start_pos += 1
             start_line = source_text[:start_pos].count("\n") + 1
 
             # Filter out control structures
             if m_name in ("if", "for", "while", "switch", "catch"):
                 continue
 
-            # Match closing brace for method body
-            brace_count = 1
-            idx = m.end()
-            while idx < len(source_text) and brace_count > 0:
-                if source_text[idx] == "{":
-                    brace_count += 1
-                elif source_text[idx] == "}":
-                    brace_count -= 1
-                idx += 1
-            end_pos = idx
+            has_body = m.group(5) == "{"
+            if has_body:
+                # Match closing brace for method body
+                end_pos = find_matching_brace(source_text, m.end())
+                body_range = SourceRange(
+                    m.end() - 1, end_pos, source_text[: m.end() - 1].count("\n") + 1, source_text[:end_pos].count("\n") + 1
+                )
+            else:
+                # Abstract/interface method declaration with no body (ends in ';')
+                end_pos = m.end()
+                body_range = None
             end_line = source_text[:end_pos].count("\n") + 1
 
             full_range = SourceRange(start_pos, end_pos, start_line, end_line)
-            body_range = SourceRange(m.end() - 1, end_pos, source_text[: m.end() - 1].count("\n") + 1, end_line)
 
             qualified_name = f"{current_class}.{m_name}" if current_class else m_name
             symbol_key = build_symbol_key(
@@ -231,15 +219,15 @@ class JavaAdapter:
 
     def render_skeleton(self, source: bytes, parsed: ParsedFile) -> str:
         source_text = source.decode("utf-8", errors="replace")
-        methods = [\
-            s for s in parsed.symbols\
-            if s.kind == SymbolKind.METHOD.value and s.body_range\
+        methods = [
+            s for s in parsed.symbols
+            if s.kind == SymbolKind.METHOD.value and s.body_range
         ]
         methods.sort(key=lambda s: s.body_range.start_byte, reverse=True)
 
         result = list(source_text)
         for m in methods:
-            assert m.body_range is not None\
+            assert m.body_range is not None
             # Replace interior of method body '{ ... }' with '{\n        // ... implementation omitted ...\n    }'
             sb = m.body_range.start_byte
             eb = m.body_range.end_byte

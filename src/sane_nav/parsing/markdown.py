@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from sane_nav.core.models import (
     ParsedDocumentSection,
@@ -101,7 +100,7 @@ class MarkdownAdapter:
             parse_error_count=0,
         )
 
-    def render_skeleton(self, source: bytes, parsed: ParsedFile) -> str:
+    def render_skeleton(self, _source: bytes, parsed: ParsedFile) -> str:
         # Outline of Markdown headings
         out: list[str] = []
         for d in parsed.docs:

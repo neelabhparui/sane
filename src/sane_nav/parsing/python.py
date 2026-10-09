@@ -42,7 +42,6 @@ class PythonAdapter:
     def _ast_range(
         self,
         node: ast.AST,
-        source_bytes: bytes,
         line_offsets: list[int],
     ) -> SourceRange:
         """Constructs a SourceRange from an AST node's line and column numbers."""
@@ -102,7 +101,7 @@ class PythonAdapter:
                 self.enclosing_symbol_key: Optional[str] = None
 
             def visit_ClassDef(self, node: ast.ClassDef):
-                full_range = self.adapter._ast_range(node, source, line_offsets)
+                full_range = self.adapter._ast_range(node, line_offsets)
                 docstring = ast.get_docstring(node)
 
                 # Body starts after docstring if present, else first statement
@@ -161,13 +160,13 @@ class PythonAdapter:
                 self.enclosing_symbol_key = old_enc
 
             def visit_FunctionDef(self, node: ast.FunctionDef):
-                self._handle_function(node, is_async=False)
+                self._handle_function(node)
 
             def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-                self._handle_function(node, is_async=True)
+                self._handle_function(node)
 
-            def _handle_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, is_async: bool):
-                full_range = self.adapter._ast_range(node, source, line_offsets)
+            def _handle_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+                full_range = self.adapter._ast_range(node, line_offsets)
                 docstring = ast.get_docstring(node)
                 signature = self.adapter._format_signature(node, source_text)
 
@@ -218,7 +217,7 @@ class PythonAdapter:
                         receiver_text = node.func.value.attr
 
                 if spelling:
-                    rng = self.adapter._ast_range(node, source, line_offsets)
+                    rng = self.adapter._ast_range(node, line_offsets)
                     references.append(
                         ParsedReference(
                             spelling=spelling,
@@ -242,8 +241,7 @@ class PythonAdapter:
 
     def render_skeleton(self, source: bytes, parsed: ParsedFile) -> str:
         """Redacts implementation bodies from the source byte-for-byte,
-        preserving decorators, type hints, docstrings, and imports.
-        """
+        preserving decorators, type hints, docstrings, and imports."""
         if not parsed.symbols:
             return source.decode("utf-8", errors="replace")
 

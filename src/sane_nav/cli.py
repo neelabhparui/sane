@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
+import sqlite3
 import sys
 from pathlib import Path
 
-from sane_nav.config import SaneConfig
 from sane_nav.indexing.indexer import Indexer
 from sane_nav.mcp.server import McpServer
 from sane_nav.mcp.tools import McpToolService
@@ -27,7 +26,7 @@ BANNER = r"""
   \__ \  / /| | /  |/ /  / __/   
  ___/ / / ___ |/ /|  /  / /___   
 /____/ /_/  |_/_/ |_/  /_____/   
-Semantic Agent Navigation Engine v0.2.1
+Semantic Agent Navigation Engine v0.4.4
 """
 
 
@@ -109,7 +108,7 @@ def _checkbox_prompt(options: list[str], prompt: str) -> list[str]:
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
-    print(f"\n(↑/↓ move, space toggles, enter confirms)")
+    print("\n(↑/↓ move, space toggles, enter confirms)")
     try:
         tty.setcbreak(fd)
         render(first=True)
@@ -237,6 +236,28 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reinit(args: argparse.Namespace) -> int:
+    """Forces a clean slate: deletes the existing .sane/ index (and .sane.toml
+    unless --keep-config) then runs init from scratch."""
+    repo_root = Path(args.repo).resolve()
+    paths = RepoPaths(repo_root)
+
+    if paths.sane_dir.exists():
+        shutil.rmtree(paths.sane_dir)
+        print(f"Removed {paths.sane_dir}")
+    else:
+        print("No existing .sane/ index to remove")
+
+    if not getattr(args, "keep_config", False):
+        config_path = repo_root / ".sane.toml"
+        if config_path.exists():
+            config_path.unlink()
+            print(f"Removed {config_path}")
+
+    print()
+    return cmd_init(args)
+
+
 def _default_toml() -> str:
     return """# S.A.N.E. Configuration (.sane.toml)
 
@@ -297,7 +318,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
     stats = indexer.index_all(on_progress=on_prog)
     print("\n")
-    print(f"✓ Indexing complete!")
+    print("✓ Indexing complete!")
     print(f"  • Total files discovered: {stats['total_files']}")
     print(f"  • Files parsed & indexed: {stats['indexed_files']}")
     print(f"  • Skipped (unchanged):   {stats['skipped_files']}")
@@ -352,27 +373,25 @@ def cmd_symbol(args: argparse.Namespace) -> int:
     if res.get("status") == "not_found":
         print(f"Error: {res.get('error')}")
         return 1
-    elif res.get("status") == "ambiguous":
+    if res.get("status") == "ambiguous":
         print(f"Ambiguous: {res.get('message')}")
         for c in res.get("candidates", []):
             print(f"  • {c['symbol_id']} ({c['file']}:{c['lines'][0]})")
         return 0
-    else:
-        print(f"\n--- Symbol: {res['name']} ({res['file']}:{res['lines'][0]}-{res['lines'][1]}) ---")
-        print(res["code"])
-        return 0
+    print(f"\n--- Symbol: {res['name']} ({res['file']}:{res['lines'][0]}-{res['lines'][1]}) ---")
+    print(res["code"])
+    return 0
 
 
 def cmd_usages(args: argparse.Namespace) -> int:
     service = McpToolService(Path(args.repo).resolve())
     res = service.find_usages(args.symbol, limit=args.limit)
     print(f"\n--- Usages for '{args.symbol}' ({res['total_found']} found) ---")
-    for u in res.get("exact_usages", []):
-        print(f"\n[EXACT] {u['file']}:{u['line']} (in {u.get('enclosing_symbol') or 'global'}, confidence {u['confidence']}):")
-        print(u["snippet"])
-    for u in res.get("probable_usages", []):
-        print(f"\n[PROBABLE] {u['file']}:{u['line']} (in {u.get('enclosing_symbol') or 'global'}, confidence {u['confidence']}):")
-        print(u["snippet"])
+    for file_group in res.get("usages_by_file", []):
+        for u in file_group["usages"]:
+            tag = "EXACT" if u["confidence"] >= 0.9 else "PROBABLE"
+            print(f"\n[{tag}] {u['file']}:{u['line']} (in {u.get('enclosing_symbol') or 'global'}, confidence {u['confidence']}):")
+            print(u["snippet"])
     return 0
 
 
@@ -398,6 +417,36 @@ def cmd_implementations(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_flow(args: argparse.Namespace) -> int:
+    service = McpToolService(Path(args.repo).resolve())
+    res = service.explore_flow(args.symbol, max_depth=args.depth)
+    if res.get("status") == "not_found":
+        print(f"Error: {res.get('error')}")
+        return 1
+    if res.get("status") == "ambiguous":
+        print(f"Ambiguous: {res.get('message')}")
+        for c in res.get("candidates", []):
+            print(f"  • {c['symbol_id']} ({c['file']}:{c['lines'][0]})")
+        return 0
+    print(res.get("flow", ""))
+    return 0
+
+
+def cmd_impact(args: argparse.Namespace) -> int:
+    service = McpToolService(Path(args.repo).resolve())
+    res = service.analyze_impact(args.symbol, depth=args.depth, include_tests=not args.no_tests)
+    if res.get("status") == "not_found":
+        print(f"Error: {res.get('error')}")
+        return 1
+    if res.get("status") == "ambiguous":
+        print(f"Ambiguous: {res.get('message')}")
+        for c in res.get("candidates", []):
+            print(f"  • {c['symbol_id']} ({c['file']}:{c['lines'][0]})")
+        return 0
+    print(res.get("report", ""))
+    return 0
+
+
 def cmd_clean(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo).resolve()
     paths = RepoPaths(repo_root)
@@ -415,7 +464,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # 1. SQLite & FTS5 check
     try:
-        import sqlite3
         conn = sqlite3.connect(":memory:")
         conn.execute("CREATE VIRTUAL TABLE fts_test USING fts5(content);")
         print("✓ SQLite FTS5 extension: Available and operational")
@@ -454,7 +502,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
             }
         }
         cmd_str = f"claude mcp add sane -- sane serve --repo {repo_root}"
-        print(f"\nTo configure Claude Code, run:")
+        print("\nTo configure Claude Code, run:")
         print(f"  {cmd_str}\n")
         print("Or add to your project's claude mcp settings:")
         print(json.dumps(config_snippet, indent=2))
@@ -536,6 +584,24 @@ def main() -> None:
         help="Skip agent configuration entirely (no prompt)",
     )
 
+    # sane reinit
+    p_reinit = subparsers.add_parser(
+        "reinit", parents=[repo_parent],
+        help="Force a clean reinit: deletes the existing .sane/ index (and .sane.toml) then runs init from scratch",
+    )
+    p_reinit.add_argument(
+        "--keep-config", action="store_true",
+        help="Keep the existing .sane.toml instead of regenerating it",
+    )
+    p_reinit.add_argument(
+        "--agents", default=None,
+        help="Comma-separated agents to configure (claude,codex,cursor,vscode); skips the interactive prompt",
+    )
+    p_reinit.add_argument(
+        "--no-agents", action="store_true",
+        help="Skip agent configuration entirely (no prompt)",
+    )
+
     # sane index
     subparsers.add_parser("index", parents=[repo_parent], help="Index or incrementally refresh repository")
 
@@ -569,6 +635,17 @@ def main() -> None:
     p_imp.add_argument("symbol", help="Target symbol name or URI")
     p_imp.add_argument("--direct-only", action="store_true", help="Only show direct implementers")
 
+    # sane flow
+    p_flow = subparsers.add_parser("flow", parents=[repo_parent], help="One-shot exploration of symbol flow (code + callers + callees + docs)")
+    p_flow.add_argument("symbol", help="Symbol name or URI")
+    p_flow.add_argument("--depth", type=int, default=1, help="Call graph traversal depth for callees (default: 1)")
+
+    # sane impact
+    p_impact = subparsers.add_parser("impact", parents=[repo_parent], help="Transitive blast radius and refactor safety analysis")
+    p_impact.add_argument("symbol", help="Target symbol name or URI")
+    p_impact.add_argument("--depth", type=int, default=2, help="Upstream caller depth (default: 2)")
+    p_impact.add_argument("--no-tests", action="store_true", help="Skip affected test suites search")
+
     # sane clean
     subparsers.add_parser("clean", parents=[repo_parent], help="Remove S.A.N.E. index and locks")
 
@@ -584,6 +661,7 @@ def main() -> None:
 
     dispatch = {
         "init": cmd_init,
+        "reinit": cmd_reinit,
         "index": cmd_index,
         "serve": cmd_serve,
         "status": cmd_status,
@@ -592,6 +670,8 @@ def main() -> None:
         "symbol": cmd_symbol,
         "usages": cmd_usages,
         "implementations": cmd_implementations,
+        "flow": cmd_flow,
+        "impact": cmd_impact,
         "clean": cmd_clean,
         "doctor": cmd_doctor,
         "setup": cmd_setup,

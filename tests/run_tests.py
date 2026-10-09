@@ -8,10 +8,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sane_nav.mcp.server import McpServer
 from sane_nav.mcp.tools import McpToolService
-from sane_nav.parsing.java import JavaAdapter
-from sane_nav.parsing.kotlin import KotlinAdapter
 from sane_nav.parsing.markdown import MarkdownAdapter
 from sane_nav.parsing.python import PythonAdapter
+from sane_nav.parsing.registry import ParserRegistry
 
 
 def create_sample_repo(tmp_path: Path):
@@ -32,6 +31,12 @@ def create_sample_repo(tmp_path: Path):
     kt_dir.mkdir(parents=True, exist_ok=True)
     (kt_dir / "CheckoutService.kt").write_bytes(
         (fixtures_dir / "kotlin" / "CheckoutService.kt").read_bytes()
+    )
+
+    swift_dir = tmp_path / "swift"
+    swift_dir.mkdir(parents=True, exist_ok=True)
+    (swift_dir / "AuthService.swift").write_bytes(
+        (fixtures_dir / "swift" / "AuthService.swift").read_bytes()
     )
 
     docs_dir = tmp_path / "docs"
@@ -62,7 +67,8 @@ def test_python_adapter(repo_root: Path):
 
 
 def test_java_adapter(repo_root: Path):
-    adapter = JavaAdapter()
+    registry = ParserRegistry()
+    adapter = registry.for_path("AuthService.java")
     j_file = repo_root / "java" / "com" / "acme" / "auth" / "AuthService.java"
     source = j_file.read_bytes()
     parsed = adapter.parse("AuthService.java", source)
@@ -79,7 +85,8 @@ def test_java_adapter(repo_root: Path):
 
 
 def test_kotlin_adapter(repo_root: Path):
-    adapter = KotlinAdapter()
+    registry = ParserRegistry()
+    adapter = registry.for_path("CheckoutService.kt")
     kt_file = repo_root / "kotlin" / "com" / "acme" / "checkout" / "CheckoutService.kt"
     source = kt_file.read_bytes()
     parsed = adapter.parse("CheckoutService.kt", source)
@@ -91,6 +98,28 @@ def test_kotlin_adapter(repo_root: Path):
     refs = [r.spelling for r in parsed.references]
     assert "capture" in refs, "capture call reference missing"
     print("✓ test_kotlin_adapter passed")
+
+
+def test_swift_adapter(repo_root: Path):
+    registry = ParserRegistry()
+    adapter = registry.for_path("AuthService.swift")
+    s_file = repo_root / "swift" / "AuthService.swift"
+    source = s_file.read_bytes()
+    parsed = adapter.parse("AuthService.swift", source)
+
+    names = [s.name for s in parsed.symbols]
+    assert "AuthService" in names, "AuthService missing"
+    assert "validateToken" in names, "validateToken missing"
+    assert "rotateRefreshToken" in names, "rotateRefreshToken missing"
+
+    refs = [r.spelling for r in parsed.references]
+    assert "findUserId" in refs, "findUserId missing"
+    assert "invalidate" in refs, "invalidate missing"
+
+    skeleton = adapter.render_skeleton(source, parsed)
+    assert "// ... implementation omitted ..." in skeleton, "Swift skeleton marker missing"
+    assert "public func rotateRefreshToken" in skeleton, "Swift signature missing"
+    print("✓ test_swift_adapter passed")
 
 
 def test_markdown_adapter(repo_root: Path):
@@ -117,12 +146,12 @@ def test_indexing_and_mcp_tools(repo_root: Path):
 
     # 1. Index everything
     stats = service.indexer.index_all()
-    assert stats["total_files"] == 4, f"Expected 4 files, got {stats['total_files']}"
-    assert stats["indexed_files"] == 4, f"Expected 4 indexed files, got {stats['indexed_files']}"
+    assert stats["total_files"] == 5, f"Expected 5 files, got {stats['total_files']}"
+    assert stats["indexed_files"] == 5, f"Expected 5 indexed files, got {stats['indexed_files']}"
 
     # 2. Check index_status
     status = service.index_status()
-    assert status["files"] == 4, f"Expected 4 files, got {status['files']}"
+    assert status["files"] == 5, f"Expected 5 files, got {status['files']}"
     assert status["symbols"] > 0, "No symbols indexed"
     assert status["docs"] > 0, "No docs indexed"
 
@@ -208,12 +237,13 @@ def main():
         test_python_adapter(tmp_path)
         test_java_adapter(tmp_path)
         test_kotlin_adapter(tmp_path)
+        test_swift_adapter(tmp_path)
         test_markdown_adapter(tmp_path)
         test_indexing_and_mcp_tools(tmp_path)
         test_mcp_server_jsonrpc(tmp_path)
 
     print("=" * 60)
-    print("ALL TESTS PASSED SUCCESSFULLY! (6/6 test groups passed)")
+    print("ALL TESTS PASSED SUCCESSFULLY! (7/7 test groups passed)")
     print("=" * 60)
 
 

@@ -1,21 +1,17 @@
 class SaneError(Exception):
     """Base exception for all S.A.N.E. errors."""
-    pass
 
 
 class PathOutsideRepository(SaneError):
     """Raised when an operation requests a path that escapes the repository root."""
-    pass
 
 
 class IndexNotFoundError(SaneError):
     """Raised when the S.A.N.E. SQLite index does not exist or has not been initialized."""
-    pass
 
 
 class SymbolNotFoundError(SaneError):
     """Raised when a requested symbol cannot be found."""
-    pass
 
 
 class AmbiguousSymbolError(SaneError):
@@ -27,4 +23,3 @@ class AmbiguousSymbolError(SaneError):
 
 class UnsupportedLanguageError(SaneError):
     """Raised when a file's language is not supported for structural parsing."""
-    pass

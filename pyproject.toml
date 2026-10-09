@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sane-nav"
-version = "0.2.1"
+version = "0.4.4"
 description = "Token-efficient progressive-disclosure semantic code navigation engine and MCP server for AI coding agents"
 readme = "README.md"
 authors = [
@@ -36,6 +36,8 @@ dependencies = [
     "watchfiles>=0.21.0",
     "pathspec>=0.12.0",
     "typer>=0.12.0",
+    "tree-sitter>=0.22.0",
+    "tree-sitter-language-pack>=0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +53,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.4.0",
     "mypy>=1.9.0",
+    "pylint>=3.0.0",
 ]
 
 [project.scripts]
@@ -59,3 +62,37 @@ sane = "sane_nav.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["sane_nav*"]
+
+[tool.setuptools.package-data]
+"sane_nav.parsing.treesitter" = ["queries/*.scm", "NOTICE"]
+
+[tool.pylint.main]
+py-version = "3.10"
+ignore-paths = ["tests/fixtures"]
+
+[tool.pylint.messages_control]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "line-too-long",
+    "duplicate-code",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-instance-attributes",
+    "too-few-public-methods",
+    "too-many-return-statements",
+    "broad-exception-caught",
+    "logging-fstring-interpolation",
+    "redefined-outer-name",
+    "protected-access",
+    "invalid-name",
+    "import-outside-toplevel",
+    "wrong-import-position",
+]
+
+[tool.pylint.format]
+max-line-length = 120

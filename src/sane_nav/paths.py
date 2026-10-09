@@ -7,9 +7,7 @@ and unauthorized access to sensitive credential stores.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Optional
 
 from sane_nav.core.errors import PathOutsideRepository
 
@@ -61,10 +59,10 @@ class RepoPaths:
 
         try:
             candidate.relative_to(self.repo_root)
-        except ValueError:
+        except ValueError as exc:
             raise PathOutsideRepository(
                 f"Security violation: path '{user_path}' escapes repository root '{self.repo_root}'"
-            )
+            ) from exc
 
         if not allow_sensitive:
             if candidate.name in SENSITIVE_PATTERNS or candidate.suffix in SENSITIVE_EXTENSIONS:
