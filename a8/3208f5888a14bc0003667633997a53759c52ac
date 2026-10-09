@@ -1,0 +1,114 @@
+src/sane_nav/retrieval/lexical.py
+  s_dd63355a34b14d::t_bbd34416624bcb 49-51
+  s_dd63355a34b14d::t_ef72dd14544400 4
+  s_dd63355a34b14d::t_d932a23f9e781b 42-45
+  s_dd63355a34b14d::t_82f97b64304f6e 68-71,75-81
+src/sane_nav/mcp/schemas.py
+  s_dd63355a34b14d::t_9d9127d3d7de2c 69
+  s_1078071925b30d::t_2d48c9c808bd38 60-61
+  s_1078071925b30d::t_8a958f6af75364 73,76-77
+  s_dd63355a34b14d::t_ea686732eb684d 54
+  s_dd63355a34b14d::t_96964fadaba3a4 9-13,18
+  s_65c3b7de2986cf::t_d7b273e2edbfcf 78
+  s_dd63355a34b14d::t_65443d5c9391e1 8,14,20
+  s_1078071925b30d::t_29ffeda6765af4 22
+tests/test_sane.py
+  s_65c3b7de2986cf::t_88a9fc5d7f40bd 195-197
+src/sane_nav/cli.py
+  s_1078071925b30d::t_d1112fd9ed08ee 587-604
+  s_1078071925b30d::t_240ea564b122fc 239-260
+  s_65c3b7de2986cf::t_5ac2fe6894a4b8 390-394
+  s_1078071925b30d::t_5556dd267ce545 664
+src/sane_nav/retrieval/ranking.py
+  s_dd63355a34b14d::t_26c353395739c3 28-30,35-36
+src/sane_nav/storage/database.py
+  s_1078071925b30d::t_2a7398f9137c34 278-279,287-288,290,295,304,313,326,328-345
+  s_dd63355a34b14d::t_09121007da12f5 261-270
+  s_65c3b7de2986cf::t_d28637be5019de 280-286,289
+  s_1078071925b30d::t_128ddb890ef6b2 9
+  s_1078071925b30d::t_0b9a16c738b7b9 396-435
+src/sane_nav/mcp/server.py
+  s_dd63355a34b14d::t_96ea1a361103dd 12,16,20-22
+  s_dd63355a34b14d::t_0205a9bd28124b 82-91
+  s_1078071925b30d::t_f624914e5d68be 92-104
+  s_dd63355a34b14d::t_f08a9b302e20bc 81,105
+  s_dd63355a34b14d::t_a32d0956d28a0b 42,44-48,50-54,56-58
+src/sane_nav/mcp/tools.py
+  s_1078071925b30d::t_2d340223f651f0 190
+  s_65c3b7de2986cf::t_2d09f105f1533e 484
+  s_1078071925b30d::t_c5a0cb6cc252c3 161-189,200-206
+  s_1078071925b30d::t_919ad3d6b1ca19 361-362,365,367-370,375-382,385-391,394,399,408-410,413-414,423
+  s_dd63355a34b14d::t_2b44e955aaa7ee 85-105
+  s_1078071925b30d::t_9000d52640d0b0 242-250,258-265
+  s_1078071925b30d::t_9ac353051a9cbd 57,66-67,73-77,79-80
+  s_1078071925b30d::t_3172cfdd865eef 113
+  s_65c3b7de2986cf::t_b069b63f4572fe 411-412
+  s_dd63355a34b14d::t_0ca5ea0893659e 108-112,114-117,119-121
+  s_65c3b7de2986cf::t_bb0623463d950f 489,491-495
+  s_65c3b7de2986cf::t_dd9a53c50394c5 433,441-444,467
+  s_1078071925b30d::t_fa477b31b04ff6 118,134,149
+  s_1078071925b30d::t_bdcb38b2262171 191-193
+  s_1078071925b30d::t_521569d16f350a 341-347,353-354,360,363-364,366,371-374,395,400,403,418-419,424,427,430-432,438-440,447-452,460-461,473-480,486,490,500
+  s_65c3b7de2986cf::t_81eb5d0bec2670 355
+  s_1078071925b30d::t_c435ba97db7d3d 481,496-499,501-504
+  s_dd63355a34b14d::t_3afc4566fc14cf 10
+src/sane_nav/parsing/brace_matching.py
+  s_65c3b7de2986cf::t_3589f092180ee4 1-74
+README.md
+  s_0724dc05ebe80c::t_8dfce5263e9d1b 75-79,81-83
+src/sane_nav/parsing/kotlin.py
+  s_65c3b7de2986cf::t_53d38e251a37ce 7
+  s_65c3b7de2986cf::t_610a14f56fec4a 270-274
+  s_65c3b7de2986cf::t_233d7eb2de1358 183
+  s_65c3b7de2986cf::t_893ae712f7393a 93
+  s_65c3b7de2986cf::t_aa4c27967d4ddd 259-262
+  s_65c3b7de2986cf::t_d95f1681d47c41 244-248,250-251
+  s_65c3b7de2986cf::t_4166044dbff7d4 257
+src/sane_nav/parsing/java.py
+  s_65c3b7de2986cf::t_cfa57114cf59db 138-141,143-144
+  s_65c3b7de2986cf::t_333b18cceacbeb 151-153,155-161
+  s_65c3b7de2986cf::t_2a58296a6987bf 154
+  s_65c3b7de2986cf::t_baaccf29d507b2 43
+  s_65c3b7de2986cf::t_af5fd1d225875e 74
+  s_65c3b7de2986cf::t_c9dd5a2643f9fa 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "a83208f5888a14bc0003667633997a53759c52ac",
+  "prompts": {},
+  "sessions": {
+    "s_0724dc05ebe80c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fabdd7e8-695c-4dd6-8a48-e26f03e1add6",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    },
+    "s_1078071925b30d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "934f4f7a-bbce-4db1-a6ce-b537fab9a85a",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    },
+    "s_65c3b7de2986cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dfc7d666-0865-4419-a18f-457b1c11d187",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    },
+    "s_dd63355a34b14d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f7cb6a1-f493-440e-880a-751c1ba13827",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "neelabhparui <neelabhparui1997@gmail.com>"
+    }
+  }
+}
