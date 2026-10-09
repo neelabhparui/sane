@@ -84,9 +84,7 @@ class RepoPaths:
     @property
     def sane_dir(self) -> Path:
         """Directory storing S.A.N.E. index and locks: .sane/"""
-        d = self.repo_root / ".sane"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return self.repo_root / ".sane"
 
     @property
     def db_path(self) -> Path:
