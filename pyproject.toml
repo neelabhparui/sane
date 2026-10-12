@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sane-nav"
-version = "0.4.4"
-description = "Token-efficient progressive-disclosure semantic code navigation engine and MCP server for AI coding agents"
+version = "0.5.0"
+description = "Token-efficient progressive-disclosure CLI code navigation engine and agent skills for AI coding agents"
 readme = "README.md"
 authors = [
     { name = "neelabhparui" }
@@ -14,8 +14,8 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = [
-    "mcp",
-    "model-context-protocol",
+    "cli",
+    "agent-skills",
     "code-navigation",
     "ai-agents",
     "token-efficiency",
@@ -42,9 +42,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = [
-    "mcp>=1.0.0",
-]
 semantic = [
     "sqlite-vec",
 ]

@@ -2,19 +2,22 @@
 
 ## 1. Overview
 
-The `sane` command-line utility provides developers and AI agents with direct access to indexing, health checks, symbol extraction, and MCP serving.
+The `sane` command-line utility provides developers and AI agents with direct, token-efficient access to progressive-disclosure code navigation, architecture discovery, and impact analysis.
 
 ---
 
 ## 2. Command Reference
 
 ### `sane init`
-Initializes a new S.A.N.E. configuration in the repository.
+Initializes a new S.A.N.E. configuration, builds the repository index, configures agent skills, and starts the background watcher daemon.
 ```bash
-sane init [--repo <path>]
+sane init [--repo <path>] [--agents <list>] [--no-agents]
 ```
 - Creates `.sane.toml` with default inclusions, exclusions, and worker settings.
-- Automatically appends `.sane/` to `.gitignore`.
+- Appends `.sane/` to `.gitignore`.
+- Indexes all discovered source files into `.sane/index.db`.
+- Installs the `sane-nav` skill for selected agents (`universal`, `claude`, `cursor`, `gemini`, `codex`, `vscode`).
+- Automatically launches the background watcher daemon (`.sane/watcher.pid`, `.sane/watcher.log`).
 
 ---
 
@@ -25,49 +28,29 @@ sane index [--repo <path>]
 ```
 - Performs fast drift check using file size and `mtime_ns`.
 - Hashes and parses new or modified files.
-- Executes cross-file occurrence resolution.
+- Executes cross-file occurrence and reference resolution.
 - Updates SQLite FTS5 index.
 
 ---
 
-### `sane serve`
-Starts the stdio JSON-RPC 2.0 MCP server.
+### `sane flow <symbol>`
+One-shot surgical flow exploration (anchor body + outbound callees + inbound callers + fused documentation).
 ```bash
-sane serve [--repo <path>]
+sane flow "PaymentService.capture" [--depth 1] [--repo <path>]
 ```
-- Listens on `stdin` and writes JSON-RPC responses to `stdout`.
-- Diagnostic logging is routed to `stderr`.
 
 ---
 
-### `sane status`
-Displays index health, statistics, file counts, and language breakdown.
+### `sane impact <symbol>`
+Computes transitive blast radius and refactor safety (callers up to depth N + subclasses/implementers + affected test suites).
 ```bash
-sane status [--repo <path>]
-```
-**Example Output:**
-```json
-{
-  "state": "ready",
-  "files": 36,
-  "symbols": 182,
-  "docs": 28,
-  "occurrences": 142,
-  "resolved_edges": 84,
-  "languages": {
-    "python": 18,
-    "java": 8,
-    "kotlin": 6,
-    "markdown": 4
-  },
-  "semantic_mode": "lexical-structural"
-}
+sane impact "PaymentService.capture" [--depth 2] [--no-tests] [--repo <path>]
 ```
 
 ---
 
 ### `sane search <query>`
-Searches symbols and documentation matching the query string.
+Searches symbols and documentation matching the query string without scoring bloat.
 ```bash
 sane search "PaymentService" [--limit 8] [--repo <path>]
 ```
@@ -75,7 +58,7 @@ sane search "PaymentService" [--limit 8] [--repo <path>]
 ---
 
 ### `sane skeleton <file>`
-Displays the structural outline of a file with implementation bodies redacted.
+Displays the structural outline of a file with implementation bodies redacted and verbose import statements collapsed to save tokens.
 ```bash
 sane skeleton src/auth.py [--repo <path>]
 ```
@@ -98,6 +81,46 @@ sane usages "capture" [--limit 10] [--repo <path>]
 
 ---
 
+### `sane implementations <symbol>`
+Finds classes and interfaces implementing or extending the target symbol.
+```bash
+sane implementations "PaymentGateway" [--direct-only] [--repo <path>]
+```
+
+---
+
+### `sane read <file>`
+Bounded structural file reader with attached architectural header (declared symbols, callers, linked docs).
+```bash
+sane read src/payment_service.py [--start 1] [--end 50] [--max-chars 12000] [--repo <path>]
+```
+
+---
+
+### `sane context <feature>`
+Synthesizes architecture documentation and relevant symbol signatures for a feature or module.
+```bash
+sane context "Retry Policy" [--prefix src/] [--max-chars 10000] [--repo <path>]
+```
+
+---
+
+### `sane tree [dir]`
+Displays a clean, gitignore-respecting structural file tree.
+```bash
+sane tree [dir] [--depth 3] [--max-entries 100] [--repo <path>]
+```
+
+---
+
+### `sane status`
+Displays index health, statistics, file counts, and language breakdown.
+```bash
+sane status [--repo <path>]
+```
+
+---
+
 ### `sane doctor`
 Runs comprehensive system and health diagnostics:
 ```bash
@@ -106,27 +129,43 @@ sane doctor [--repo <path>]
 - Verifies SQLite FTS5 extension availability.
 - Validates Python runtime version (>=3.10).
 - Confirms language parser registrations.
-- Checks index write permissions and WAL mode.
+- Checks background watcher daemon operational status.
+- Checks target repository and installed agent skills.
 
 ---
 
-### `sane setup <claude|cursor|vscode>`
-Generates or writes configuration for AI coding agents.
+### `sane watch`
+Manages the background filesystem watcher daemon or runs in the foreground with live logs.
 ```bash
-# Print configuration
+sane watch [--daemon|--start] [--stop] [--status] [--foreground] [--debounce 300] [--repo <path>]
+```
+- Automatically started in the background by `sane init`.
+- Tracks daemon process in `.sane/watcher.pid` and logs to `.sane/watcher.log`.
+- `--status`: Inspects whether the daemon process is active and displays log path.
+- `--stop`: Gracefully terminates the running background daemon.
+- `--daemon` / `--start`: Starts or restarts the detached background daemon.
+- Default invocation without flags runs in the foreground with live terminal output.
+
+---
+
+### `sane setup <client>`
+Inspects or writes the `sane-nav` skill configuration for AI coding agents.
+```bash
+# Print skill to stdout
 sane setup claude
 sane setup cursor
-sane setup vscode
+sane setup universal
 
-# Write configuration file directly
+# Write skill file directly
+sane setup claude --write
 sane setup cursor --write
-sane setup vscode --write
+sane setup universal --write
 ```
 
 ---
 
 ### `sane clean`
-Deletes the `.sane/` directory, removing the SQLite database and lock files.
+Stops running watcher daemon and deletes the `.sane/` directory, removing the SQLite database and lock files.
 ```bash
 sane clean [--repo <path>]
 ```

@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from sane_nav.mcp.server import McpServer
 from sane_nav.mcp.session import SessionDedupTracker
 from sane_nav.mcp.tools import McpToolService
 
@@ -111,26 +110,3 @@ def test_skeleton_dedup_back_reference(repo_root: Path):
 
     assert "[Source for Symbol should_retry already provided in Turn 1" in skeleton
     assert "Omitted to preserve token budget." in skeleton
-
-
-def test_mcp_server_explore_flow(repo_root: Path):
-    service = McpToolService(repo_root)
-    service.indexer.index_all()
-
-    server = McpServer(repo_root)
-
-    # Call explore_flow through MCP JSON-RPC
-    req = {
-        "jsonrpc": "2.0",
-        "id": 10,
-        "method": "tools/call",
-        "params": {
-            "name": "explore_flow",
-            "arguments": {"symbol": "PaymentService.capture"},
-        },
-    }
-    resp = server.handle_request(req)
-    assert resp["result"]["isError"] is False
-    content_text = resp["result"]["content"][0]["text"]
-    assert "Flow Analysis" in content_text
-    assert "capture" in content_text
