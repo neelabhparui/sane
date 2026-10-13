@@ -29,22 +29,43 @@ class Indexer:
         self.resolver = SymbolResolver(db)
 
     def index_all(self, on_progress: Optional[Callable[[str, int, int], None]] = None) -> dict[str, int]:
-        """Performs a full or incremental scan of the repository."""
+        """Performs a fast full or incremental scan of the repository."""
         discovered = list(self.discovery.discover())
         total = len(discovered)
         indexed_count = 0
         skipped_count = 0
 
+        # Fast batch lookup of existing file metadata
+        existing_map: dict[str, dict] = {}
+        if self.repo_paths.db_path.exists():
+            with self.db.get_connection() as conn:
+                rows = conn.execute("SELECT path, mtime_ns, size_bytes, content_hash FROM files").fetchall()
+                for r in rows:
+                    existing_map[r["path"]] = dict(r)
+
+        # Prune deleted files
+        discovered_set = {f.rel_path for f in discovered}
+        deleted_paths = set(existing_map.keys()) - discovered_set
+        if deleted_paths:
+            with self.db.get_connection() as conn:
+                for del_path in deleted_paths:
+                    self.db.delete_file_index(conn, del_path)
+                conn.commit()
+
         for idx, file_info in enumerate(discovered):
             if on_progress:
                 on_progress(file_info.rel_path, idx + 1, total)
 
-            # Check existing file record and content hash for fast drift check
-            existing = self.db.get_file(file_info.rel_path)
+            existing = existing_map.get(file_info.rel_path)
+            # Fast drift check: mtime_ns and size_bytes match -> skip immediately
+            if existing and existing.get("mtime_ns") == file_info.mtime_ns and existing.get("size_bytes") == file_info.size_bytes:
+                skipped_count += 1
+                continue
+
             content = file_info.abs_path.read_bytes()
             chash = compute_content_hash(content)
 
-            if existing and existing["content_hash"] == chash:
+            if existing and existing.get("content_hash") == chash:
                 skipped_count += 1
                 continue
 
@@ -64,7 +85,13 @@ class Indexer:
                 logger.error(f"Error indexing {file_info.rel_path}: {e}")
 
         # Post-index resolution
-        resolved_count = self.resolver.resolve_all_occurrences()
+        resolved_count = 0
+        if indexed_count > 0 or deleted_paths:
+            resolved_count = self.resolver.resolve_all_occurrences()
+        else:
+            with self.db.get_connection() as conn:
+                row = conn.execute("SELECT COUNT(*) as c FROM occurrences WHERE target_symbol_id IS NOT NULL").fetchone()
+                resolved_count = row["c"] if row else 0
 
         return {
             "total_files": total,

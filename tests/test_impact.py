@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from sane_nav.mcp.server import McpServer
 from sane_nav.mcp.tools import McpToolService
 
 
@@ -98,36 +97,3 @@ def test_read_file_structural(repo_root: Path):
     assert "Declared Symbols" in content
     assert "Upstream Dependents" in content
     assert "   1 | " in content or "1 | " in content
-
-
-def test_mcp_server_impact_and_read_structural(repo_root: Path):
-    service = McpToolService(repo_root)
-    service.indexer.index_all()
-
-    server = McpServer(repo_root)
-
-    # MCP analyze_impact
-    impact_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 20,
-        "method": "tools/call",
-        "params": {
-            "name": "analyze_impact",
-            "arguments": {"symbol": "PaymentService.capture", "depth": 2},
-        },
-    })
-    assert impact_resp["result"]["isError"] is False
-    assert "Impact Analysis" in impact_resp["result"]["content"][0]["text"]
-
-    # MCP read_file_structural
-    read_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 21,
-        "method": "tools/call",
-        "params": {
-            "name": "read_file_structural",
-            "arguments": {"file_path": "src/payment_service.py", "start": 1, "end": 20},
-        },
-    })
-    assert read_resp["result"]["isError"] is False
-    assert "Structural Context" in read_resp["result"]["content"][0]["text"]

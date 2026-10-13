@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from sane_nav.mcp.server import McpServer
 from sane_nav.mcp.tools import McpToolService
 from sane_nav.parsing.java import JavaAdapter
 from sane_nav.parsing.kotlin import KotlinAdapter
@@ -200,49 +199,6 @@ def test_indexing_and_mcp_tools(repo_root: Path):
     ctx_res = service.get_context("Retry Policy")
     assert "PaymentRetryCoordinator" in ctx_res["content"]
     assert "[Documentation]" in ctx_res["content"]
-
-
-def test_mcp_server_jsonrpc(repo_root: Path):
-    service = McpToolService(repo_root)
-    service.indexer.index_all()
-
-    server = McpServer(repo_root)
-
-    # Test initialize
-    init_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {},
-    })
-    assert init_resp["result"]["serverInfo"]["name"] == "sane-nav"
-
-    # Test tools/list
-    list_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-    })
-    tool_names = [t["name"] for t in list_resp["result"]["tools"]]
-    assert "search_semantic" in tool_names
-    assert "get_skeleton" in tool_names
-    assert "get_symbol_code" in tool_names
-    assert "find_usages" in tool_names
-    assert "get_context" in tool_names
-
-    # Test tools/call
-    call_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": {
-            "name": "search_semantic",
-            "arguments": {"query": "PaymentService"},
-        },
-    })
-    assert call_resp["result"]["isError"] is False
-    content_raw = call_resp["result"]["content"][0]["text"]
-    assert "PaymentService" in content_raw
 
 
 def test_search_semantic_empty_proximity_rerank(repo_root: Path):

@@ -34,6 +34,7 @@ class McpToolService:
         self,
         repo_root: Path,
         session_tracker: Optional[SessionDedupTracker] = None,
+        auto_sync: bool = True,
     ):
         """Initializes dependencies, database connection, and indexing engines."""
         self.repo_paths = RepoPaths(repo_root)
@@ -47,6 +48,12 @@ class McpToolService:
         self.session_tracker = session_tracker or SessionDedupTracker()
         self.flow_explorer = FlowExplorer(self.repo_paths, self.db)
         self.impact_analyzer = ImpactAnalyzer(self.repo_paths, self.db)
+        self.auto_sync = auto_sync
+
+    def ensure_synced(self) -> None:
+        """Just-In-Time drift synchronization before executing queries."""
+        if self.auto_sync and self.repo_paths.db_path.exists():
+            self.indexer.index_all()
 
     def search_semantic(
         self,
@@ -69,6 +76,7 @@ class McpToolService:
         Returns:
             Dictionary containing query metadata and ranked results.
         """
+        self.ensure_synced()
         limit = min(limit or 8, 20)
         fetch_limit = limit * 3 if context_symbol else limit
         exacts = self.lexical.search_exact(query, limit=fetch_limit)
@@ -211,6 +219,7 @@ class McpToolService:
         max_chars: int = 10000,
     ) -> dict[str, Any]:
         """Synthesizes deterministic feature documentation and key symbol signatures."""
+        self.ensure_synced()
         content = self.context_stitcher.get_feature_context(
             feature=feature,
             path_prefix=path_prefix,
@@ -223,6 +232,7 @@ class McpToolService:
 
     def get_skeleton(self, file_path: str, max_chars: int = 12000) -> dict[str, Any]:
         """Returns the structural skeleton of a file with implementation bodies redacted."""
+        self.ensure_synced()
         safe_path = self.repo_paths.resolve_user_path(file_path)
         if not safe_path.exists():
             return {"error": f"File '{file_path}' does not exist"}
@@ -248,6 +258,7 @@ class McpToolService:
         force: bool = False,
     ) -> dict[str, Any]:
         """Retrieves exact declaration and implementation code for a specific symbol."""
+        self.ensure_synced()
         candidates = self.db.get_symbol_by_id_or_name(symbol)
         if not candidates:
             return {
@@ -355,6 +366,7 @@ class McpToolService:
         min_confidence: Optional[float] = None,
     ) -> dict[str, Any]:
         """Finds cross-file references and call sites with AST-aware line context."""
+        self.ensure_synced()
         limit = min(limit or 10, 30)
 
         owner_hint: Optional[str] = class_context
@@ -509,6 +521,7 @@ class McpToolService:
         transitive: bool = True,
     ) -> dict[str, Any]:
         """Finds all classes or interfaces that implement or extend a symbol."""
+        self.ensure_synced()
         candidates = self.db.get_symbol_by_id_or_name(symbol)
         rows = self.db.get_implementations(symbol, transitive=transitive)
 
@@ -553,6 +566,7 @@ class McpToolService:
 
     def read_lines(self, file_path: str, start: int, end: int) -> dict[str, Any]:
         """Reads a bounded slice of lines from a non-symbol or configuration file."""
+        self.ensure_synced()
         safe_path = self.repo_paths.resolve_user_path(file_path)
         if not safe_path.exists():
             return {"error": f"File '{file_path}' does not exist"}
@@ -585,6 +599,7 @@ class McpToolService:
         max_chars: int = 12000,
     ) -> dict[str, Any]:
         """Reads bounded lines from a file with attached architectural context."""
+        self.ensure_synced()
         safe_path = self.repo_paths.resolve_user_path(file_path)
         if not safe_path.exists():
             return {"error": f"File '{file_path}' does not exist"}
@@ -636,27 +651,23 @@ class McpToolService:
         header_lines = [
             f"=== Structural Context: {rel_path} ===",
             f"Lines: {s_idx}-{e_idx} of {total}",
-            "",
-            f"Declared Symbols ({len(symbols)}):",
         ]
         if symbols:
+            header_lines.append("")
+            header_lines.append(f"Declared Symbols ({len(symbols)}):")
             for s in symbols[:10]:
                 sig = f" — {s['signature']}" if s.get("signature") else ""
                 header_lines.append(f"  * {s['name']} [{s['kind']}] (L{s['lines'][0]}-L{s['lines'][1]}){sig}")
             if len(symbols) > 10:
                 header_lines.append(f"  * ... +{len(symbols) - 10} more symbols")
-        else:
-            header_lines.append("  * None declared in this file.")
 
-        header_lines.append("")
-        header_lines.append(f"Upstream Dependents ({len(dependents)} files import/call this file):")
         if dependents:
+            header_lines.append("")
+            header_lines.append(f"Upstream Dependents ({len(dependents)} files):")
             for dep in dependents[:6]:
                 header_lines.append(f"  * {dep}")
             if len(dependents) > 6:
                 header_lines.append(f"  * ... +{len(dependents) - 6} more dependent files")
-        else:
-            header_lines.append("  * No upstream dependent files recorded.")
 
         if linked_docs:
             header_lines.append("")
@@ -664,7 +675,7 @@ class McpToolService:
             for doc in linked_docs:
                 header_lines.append(f"  * {doc['heading_path'] or doc['heading']} ({doc['file']}:L{doc['line']})")
 
-        header_lines.append("================================================================================")
+        header_lines.append("---")
         header_lines.append("")
 
         formatted_body = [f"{i + s_idx:4d} | {line}" for i, line in enumerate(selected_lines)]
@@ -692,6 +703,7 @@ class McpToolService:
         force: bool = False,
     ) -> dict[str, Any]:
         """One-shot surgical flow exploration (anchor + callees + callers + docs)."""
+        self.ensure_synced()
         return self.flow_explorer.explore(
             symbol=symbol,
             max_depth=max_depth,
@@ -708,6 +720,7 @@ class McpToolService:
         max_chars: int = 12000,
     ) -> dict[str, Any]:
         """Transitive blast radius and refactor safety analysis for a symbol."""
+        self.ensure_synced()
         return self.impact_analyzer.analyze(
             symbol=symbol,
             depth=depth,
@@ -722,6 +735,7 @@ class McpToolService:
         max_entries: int = 100,
     ) -> dict[str, Any]:
         """Returns bounded repository directory structure respecting ignore patterns."""
+        self.ensure_synced()
         safe_path = self.repo_paths.resolve_user_path(dir_path or ".")
         if not safe_path.exists() or not safe_path.is_dir():
             return {"error": f"Directory '{dir_path}' does not exist"}

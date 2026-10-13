@@ -6,7 +6,6 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sane_nav.mcp.server import McpServer
 from sane_nav.mcp.tools import McpToolService
 from sane_nav.parsing.markdown import MarkdownAdapter
 from sane_nav.parsing.python import PythonAdapter
@@ -184,46 +183,14 @@ def test_indexing_and_mcp_tools(repo_root: Path):
     print("✓ test_indexing_and_mcp_tools passed")
 
 
-def test_mcp_server_jsonrpc(repo_root: Path):
-    service = McpToolService(repo_root)
-    service.indexer.index_all()
-    server = McpServer(repo_root)
 
-    # Test initialize
-    init_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {},
-    })
-    assert init_resp["result"]["serverInfo"]["name"] == "sane-nav", "Server name mismatch"
-
-    # Test tools/list
-    list_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-    })
-    tool_names = [t["name"] for t in list_resp["result"]["tools"]]
-    assert "search_semantic" in tool_names
-    assert "get_skeleton" in tool_names
-    assert "get_symbol_code" in tool_names
-    assert "find_usages" in tool_names
-    assert "get_context" in tool_names
-
-    # Test tools/call
-    call_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": {
-            "name": "search_semantic",
-            "arguments": {"query": "PaymentService"},
-        },
-    })
-    assert call_resp["result"]["isError"] is False
-    assert "PaymentService" in call_resp["result"]["content"][0]["text"]
-    print("✓ test_mcp_server_jsonrpc passed")
+def test_skills_installation(repo_root: Path):
+    from sane_nav.skills import install_skill
+    target = install_skill("universal", repo_root)
+    assert target is not None and target.exists(), "Universal skill installation failed"
+    text = target.read_text(encoding="utf-8")
+    assert "name: sane-nav" in text
+    print("✓ test_skills_installation passed")
 
 
 def main():
@@ -240,7 +207,7 @@ def main():
         test_swift_adapter(tmp_path)
         test_markdown_adapter(tmp_path)
         test_indexing_and_mcp_tools(tmp_path)
-        test_mcp_server_jsonrpc(tmp_path)
+        test_skills_installation(tmp_path)
 
     print("=" * 60)
     print("ALL TESTS PASSED SUCCESSFULLY! (7/7 test groups passed)")

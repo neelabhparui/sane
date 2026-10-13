@@ -203,3 +203,35 @@ def test_database_queries(index_repo: Path):
 
     # Proximity for empty seeds
     assert db.get_graph_proximity([]) == {}
+
+def test_jit_drift_auto_sync(index_repo: Path):
+    from sane_nav.mcp.tools import McpToolService
+    # 1. Initial index
+    service1 = McpToolService(index_repo)
+    service1.indexer.index_all()
+
+    # 2. Modify existing file by adding a new function
+    py_file = index_repo / "src" / "payment_service.py"
+    original = py_file.read_text(encoding="utf-8")
+    py_file.write_text(original + "\ndef newly_added_payment_method(): pass\n", encoding="utf-8")
+
+    # 3. Create fresh service (simulating next CLI command)
+    service2 = McpToolService(index_repo)
+    # The JIT auto-sync should have updated the index automatically
+    sym_res = service2.get_symbol_code("newly_added_payment_method")
+    assert sym_res["status"] == "success"
+    assert "def newly_added_payment_method" in sym_res["code"]
+
+    # 4. Create brand new file
+    new_py = index_repo / "src" / "refund.py"
+    new_py.write_text("class RefundService:\n    def process_refund(self): pass\n", encoding="utf-8")
+
+    service3 = McpToolService(index_repo)
+    sym_res3 = service3.get_symbol_code("RefundService.process_refund")
+    assert sym_res3["status"] == "success"
+
+    # 5. Delete the file
+    new_py.unlink()
+    service4 = McpToolService(index_repo)
+    sym_res4 = service4.get_symbol_code("RefundService.process_refund")
+    assert sym_res4["status"] == "not_found"

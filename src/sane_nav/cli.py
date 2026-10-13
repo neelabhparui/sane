@@ -1,7 +1,8 @@
 """Command-Line Interface (CLI) for S.A.N.E.
 
-Exposes commands for repository initialization, indexing, MCP serving,
-health checks, symbol extraction, usage tracing, implementations, and agent configuration.
+Exposes commands for repository initialization, indexing, agent skill installation,
+health checks, symbol extraction, usage tracing, implementations, flow exploration,
+impact analysis, structural reading, and feature context.
 """
 
 from __future__ import annotations
@@ -13,11 +14,17 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from sane_nav.indexing.incremental import IncrementalSync
 from sane_nav.indexing.indexer import Indexer
-from sane_nav.mcp.server import McpServer
+from sane_nav.indexing.watcher import RepoWatcher, start_daemon, status_daemon, stop_daemon
 from sane_nav.mcp.tools import McpToolService
 from sane_nav.parsing.registry import ParserRegistry
 from sane_nav.paths import RepoPaths
+from sane_nav.skills import (
+    AGENT_SKILL_PATHS,
+    get_skill_markdown,
+    install_skill,
+)
 from sane_nav.storage.database import Database
 
 BANNER = r"""
@@ -26,50 +33,10 @@ BANNER = r"""
   \__ \  / /| | /  |/ /  / __/   
  ___/ / / ___ |/ /|  /  / /___   
 /____/ /_/  |_/_/ |_/  /_____/   
-Semantic Agent Navigation Engine v0.4.4
+Semantic Agent Navigation Engine v0.5.0
 """
 
-
-AGENT_CONFIGS = {
-    "claude": {
-        "path": ".mcp.json",
-        "build": lambda repo_root: {
-            "mcpServers": {
-                "sane": {
-                    "command": "sane",
-                    "args": ["serve", "--repo", str(repo_root)],
-                }
-            }
-        },
-    },
-    "cursor": {
-        "path": ".cursor/mcp.json",
-        "build": lambda repo_root: {
-            "mcpServers": {
-                "sane": {
-                    "command": "sane",
-                    "args": ["serve", "--repo", str(repo_root)],
-                }
-            }
-        },
-    },
-    "vscode": {
-        "path": ".vscode/mcp.json",
-        "build": lambda repo_root: {
-            "mcpServers": {
-                "sane": {
-                    "type": "stdio",
-                    "command": "sane",
-                    "args": ["serve", "--repo", str(repo_root)],
-                }
-            }
-        },
-    },
-    "codex": {
-        "path": ".codex/config.toml",
-        "build": None,
-    },
-}
+SUPPORTED_AGENTS = ["universal", "claude", "cursor", "gemini", "codex", "vscode"]
 
 
 def _checkbox_prompt(options: list[str], prompt: str) -> list[str]:
@@ -135,50 +102,18 @@ def _checkbox_prompt(options: list[str], prompt: str) -> list[str]:
     return [opt for opt, is_sel in zip(options, selected) if is_sel]
 
 
-def _merge_mcp_json(config_path: Path, snippet: dict) -> None:
-    """Merges a {"mcpServers": {...}} snippet into an existing or new JSON file."""
-    existing: dict = {}
-    if config_path.exists():
-        try:
-            existing = json.loads(config_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-    existing.setdefault("mcpServers", {})
-    existing["mcpServers"].update(snippet["mcpServers"])
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-
-
 def _setup_agent(client: str, repo_root: Path) -> None:
-    client = client.lower()
-    if client == "codex":
-        toml_path = repo_root / ".codex" / "config.toml"
-        toml_path.parent.mkdir(parents=True, exist_ok=True)
-        snippet = (
-            f'\n[mcp_servers.sane]\n'
-            f'command = "sane"\n'
-            f'args = ["serve", "--repo", "{repo_root}"]\n'
-        )
-        existing = toml_path.read_text(encoding="utf-8") if toml_path.exists() else ""
-        if "[mcp_servers.sane]" in existing:
-            print(f"  • codex: sane already configured in {toml_path}")
-            return
-        with open(toml_path, "a", encoding="utf-8") as f:
-            f.write(snippet)
-        print(f"  • codex: added sane MCP server to {toml_path}")
-        return
-
-    cfg = AGENT_CONFIGS.get(client)
-    if not cfg:
-        print(f"  • {client}: unsupported, skipped")
-        return
-    config_path = repo_root / cfg["path"]
-    _merge_mcp_json(config_path, cfg["build"](repo_root))
-    print(f"  • {client}: added sane MCP server to {config_path}")
+    client = client.lower().strip()
+    target_path = install_skill(client, repo_root)
+    if target_path:
+        rel_str = target_path.relative_to(repo_root)
+        print(f"  • {client}: installed sane-nav skill to {rel_str}")
+    else:
+        print(f"  • {client}: unsupported agent, skipped")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """One-shot setup: creates .sane.toml, indexes the repo, and wires up MCP for chosen agents."""
+    """One-shot setup: creates .sane.toml, indexes the repo, and installs sane-nav skills for chosen agents."""
     print(BANNER)
     repo_root = Path(args.repo).resolve()
     config_path = repo_root / ".sane.toml"
@@ -222,17 +157,16 @@ def cmd_init(args: argparse.Namespace) -> int:
         selected = []
     else:
         selected = _checkbox_prompt(
-            list(AGENT_CONFIGS.keys()),
-            "Which agents should be configured to use S.A.N.E. via MCP?",
+            SUPPORTED_AGENTS,
+            "Which agents should be configured with the S.A.N.E. navigation skill?",
         )
 
     if selected:
-        print("\nConfiguring agents:")
+        print("\nConfiguring agent skills:")
         for client in selected:
             _setup_agent(client, repo_root)
 
-    print("\n✓ S.A.N.E. is ready. Run 'sane serve --repo .' to start the MCP server manually,")
-    print("  or your configured agent will launch it automatically.")
+    print("\n✓ S.A.N.E. is ready. Your agents can now run 'sane' commands via the installed skill.")
     return 0
 
 
@@ -240,6 +174,7 @@ def cmd_reinit(args: argparse.Namespace) -> int:
     """Forces a clean slate: deletes the existing .sane/ index (and .sane.toml
     unless --keep-config) then runs init from scratch."""
     repo_root = Path(args.repo).resolve()
+    stop_daemon(repo_root)
     paths = RepoPaths(repo_root)
 
     if paths.sane_dir.exists():
@@ -354,7 +289,6 @@ def cmd_search(args: argparse.Namespace) -> int:
             print(f"\n[{r['kind'].upper()}] {r['qualified_name'] or r['name']} ({r['file']}:{r['lines'][0]}-{r['lines'][1]})")
             if r.get("signature"):
                 print(f"      {r['signature']}")
-            print(f"      Match: {r['match']['reason']} (score: {r['match']['score']})")
     print("")
     return 0
 
@@ -390,7 +324,8 @@ def cmd_usages(args: argparse.Namespace) -> int:
     for file_group in res.get("usages_by_file", []):
         for u in file_group["usages"]:
             tag = "EXACT" if u["confidence"] >= 0.9 else "PROBABLE"
-            print(f"\n[{tag}] {u['file']}:{u['line']} (in {u.get('enclosing_symbol') or 'global'}, confidence {u['confidence']}):")
+            enc = f"in {u['enclosing_symbol']}" if u.get('enclosing_symbol') else "global"
+            print(f"\n[{tag}] {u['file']}:{u['line']} ({enc}):")
             print(u["snippet"])
     return 0
 
@@ -447,8 +382,115 @@ def cmd_impact(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_read(args: argparse.Namespace) -> int:
+    service = McpToolService(Path(args.repo).resolve())
+    res = service.read_file_structural(
+        args.file,
+        start=args.start,
+        end=args.end,
+        max_chars=args.max_chars,
+    )
+    if "error" in res:
+        print(f"Error: {res['error']}")
+        return 1
+    print(res.get("content", ""))
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    service = McpToolService(Path(args.repo).resolve())
+    res = service.get_context(
+        feature=args.feature,
+        path_prefix=args.prefix,
+        max_chars=args.max_chars,
+    )
+    print(f"\n--- Context for '{args.feature}' ---")
+    print(res.get("content", ""))
+    return 0
+
+
+def cmd_tree(args: argparse.Namespace) -> int:
+    service = McpToolService(Path(args.repo).resolve())
+    res = service.get_file_tree(
+        dir_path=args.dir,
+        depth=args.depth,
+        max_entries=args.max_entries,
+    )
+    print(f"\n--- File Tree for {args.dir or '.'} ({res.get('total_files', 0)} files) ---")
+    for f in res.get("tree", []):
+        sym_count = f.get("symbols_count", 0)
+        sym_info = f" ({sym_count} symbols)" if sym_count else ""
+        print(f"  {f['path']}{sym_info}")
+    return 0
+
+
+def _default_agents_md() -> str:
+    return """# Instructions for AI Coding Agents in this Repository
+
+Welcome, Agent. This repository is powered by **S.A.N.E. (Semantic Agent Navigation Engine)**.
+
+## MANDATORY RULE: NEVER USE GREP, RIPGREP, OR FIND FOR CODE EXPLORATION
+
+You MUST always activate and use the **`sane-nav` skill** and `sane` CLI commands instead of `grep`, `rg`, `find`, or dumping raw files. 
+
+### Why Grep is Forbidden Here:
+- Brute-force `grep` floods your context window with raw code, causing attention degradation and missing semantic call hierarchy.
+- `sane` queries the local AST and SQLite call graph, automatically syncing any recent file changes (sub-millisecond JIT drift check) before returning precise, bounded context under token budget.
+
+## Navigation Protocol Summary
+```text
+sane flow (1-shot) OR sane search → sane skeleton → sane symbol → sane usages → sane impact
+```
+"""
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Controls the repository watcher daemon or runs in foreground."""
+    repo_root = Path(args.repo).resolve()
+
+    if getattr(args, "stop", False):
+        stopped, msg = stop_daemon(repo_root)
+        print(msg)
+        return 0 if stopped else 1
+
+    if getattr(args, "status", False):
+        st = status_daemon(repo_root)
+        if st["running"]:
+            print(f"S.A.N.E. Watcher Daemon: RUNNING (PID {st['pid']})")
+            print(f"Log file: {st['log_file']}")
+        else:
+            print("S.A.N.E. Watcher Daemon: STOPPED")
+            print(f"Log file: {st['log_file']}")
+        return 0
+
+    if getattr(args, "daemon", False):
+        started, msg, _ = start_daemon(repo_root, debounce_ms=args.debounce)
+        print(msg)
+        if started:
+            print(f"Logs: {repo_root / '.sane' / 'watcher.log'}")
+            print("To stop: sane watch --stop")
+        return 0
+
+    paths = RepoPaths(repo_root)
+    db = Database(paths.db_path)
+    indexer = Indexer(paths, db)
+    sync = IncrementalSync(indexer)
+    watcher = RepoWatcher(repo_root, sync, debounce_ms=args.debounce)
+
+    print(BANNER)
+    print(f"Watching {repo_root} for file changes (press Ctrl+C to stop)...")
+    try:
+        import asyncio
+        asyncio.run(watcher.start())
+    except KeyboardInterrupt:
+        print("\nStopped watching.")
+        watcher.stop()
+    return 0
+
+
 def cmd_clean(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo).resolve()
+    stop_daemon(repo_root)
     paths = RepoPaths(repo_root)
     if paths.sane_dir.exists():
         shutil.rmtree(paths.sane_dir)
@@ -470,7 +512,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"✗ SQLite FTS5 check failed: {e}")
 
-    # 2. Python environment
+    # 2. Python runtime
     print(f"✓ Python runtime: {sys.version.split()[0]} ({sys.executable})")
 
     # 3. Parsers check
@@ -482,79 +524,50 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo).resolve()
     print(f"✓ Target repository: {repo_root}")
 
-    # 5. MCP capabilities
-    print("✓ MCP Stdio JSON-RPC 2.0 interface: Ready")
-    print("\nAll diagnostics passed! S.A.N.E. is healthy and ready to serve.")
+    # 5. Installed agent skills
+    skills_found = []
+    checked = set()
+    for agent_name, rel_path in AGENT_SKILL_PATHS.items():
+        if rel_path in checked:
+            continue
+        checked.add(rel_path)
+        if (repo_root / rel_path).exists():
+            skills_found.append(f"{agent_name} ({rel_path})")
+
+    if skills_found:
+        print(f"✓ Installed agent skills: {', '.join(skills_found)}")
+    else:
+        print("ℹ No agent skills found in this repo. Run 'sane init' to install them.")
+
+    # 6. Background watcher daemon check
+    w_status = status_daemon(repo_root)
+    if w_status["running"]:
+        print(f"✓ Background watcher daemon: Running (PID: {w_status['pid']})")
+    else:
+        print("ℹ Background watcher daemon: Not running (Run 'sane watch' to start)")
+
+    print("\nAll diagnostics passed! S.A.N.E. is healthy and ready.")
     return 0
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    client = args.client.lower()
+    client = args.client.lower().strip()
     repo_root = Path(args.repo).resolve()
-
-    if client == "claude":
-        config_snippet = {
-            "mcpServers": {
-                "sane": {
-                    "command": "sane",
-                    "args": ["serve", "--repo", str(repo_root)],
-                }
-            }
-        }
-        cmd_str = f"claude mcp add sane -- sane serve --repo {repo_root}"
-        print("\nTo configure Claude Code, run:")
-        print(f"  {cmd_str}\n")
-        print("Or add to your project's claude mcp settings:")
-        print(json.dumps(config_snippet, indent=2))
-
-    elif client == "cursor":
-        config_path = repo_root / ".cursor" / "mcp.json"
-        cursor_config = {
-            "mcpServers": {
-                "sane": {
-                    "command": "sane",
-                    "args": ["serve", "--repo", "."]
-                }
-            }
-        }
-        if args.write:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(json.dumps(cursor_config, indent=2), encoding="utf-8")
-            print(f"Wrote Cursor MCP configuration to {config_path}")
-        else:
-            print(f"\nCursor MCP configuration for {config_path}:")
-            print(json.dumps(cursor_config, indent=2))
-            print("\nRun with '--write' to create .cursor/mcp.json automatically.")
-
-    elif client == "vscode":
-        config_path = repo_root / ".vscode" / "mcp.json"
-        vscode_config = {
-            "mcpServers": {
-                "sane": {
-                    "type": "stdio",
-                    "command": "sane",
-                    "args": ["serve", "--repo", "."]
-                }
-            }
-        }
-        if args.write:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(json.dumps(vscode_config, indent=2), encoding="utf-8")
-            print(f"Wrote VS Code MCP configuration to {config_path}")
-        else:
-            print(f"\nVS Code MCP configuration for {config_path}:")
-            print(json.dumps(vscode_config, indent=2))
-            print("\nRun with '--write' to create .vscode/mcp.json automatically.")
-    else:
-        print(f"Unknown client '{client}'. Supported: claude, cursor, vscode")
+    rel_path = AGENT_SKILL_PATHS.get(client)
+    if not rel_path:
+        print(f"Unknown client '{client}'. Supported: {', '.join(SUPPORTED_AGENTS)}")
         return 1
 
-    return 0
-
-
-def cmd_serve(args: argparse.Namespace) -> int:
-    server = McpServer(Path(args.repo).resolve())
-    server.run_stdio()
+    target_path = repo_root / rel_path
+    if args.write:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(get_skill_markdown(), encoding="utf-8")
+        print(f"Wrote sane-nav skill to {target_path}")
+    else:
+        print(f"\nsane-nav skill target for {client}: {target_path}")
+        print("--- Content ---")
+        print(get_skill_markdown())
+        print("Run with '--write' to create this skill file automatically.")
     return 0
 
 
@@ -573,11 +586,11 @@ def main() -> None:
     # sane init
     p_init = subparsers.add_parser(
         "init", parents=[repo_parent],
-        help="One-shot setup: create .sane.toml, index the repo, and configure MCP for agents",
+        help="One-shot setup: create .sane.toml, index the repo, and install sane-nav skill for agents",
     )
     p_init.add_argument(
         "--agents", default=None,
-        help="Comma-separated agents to configure (claude,codex,cursor,vscode); skips the interactive prompt",
+        help="Comma-separated agents to configure (universal,claude,cursor,gemini,codex,vscode); skips prompt",
     )
     p_init.add_argument(
         "--no-agents", action="store_true",
@@ -595,7 +608,7 @@ def main() -> None:
     )
     p_reinit.add_argument(
         "--agents", default=None,
-        help="Comma-separated agents to configure (claude,codex,cursor,vscode); skips the interactive prompt",
+        help="Comma-separated agents to configure (universal,claude,cursor,gemini,codex,vscode); skips prompt",
     )
     p_reinit.add_argument(
         "--no-agents", action="store_true",
@@ -604,9 +617,6 @@ def main() -> None:
 
     # sane index
     subparsers.add_parser("index", parents=[repo_parent], help="Index or incrementally refresh repository")
-
-    # sane serve
-    subparsers.add_parser("serve", parents=[repo_parent], help="Run MCP stdio server")
 
     # sane status
     subparsers.add_parser("status", parents=[repo_parent], help="Show index status and statistics")
@@ -646,16 +656,43 @@ def main() -> None:
     p_impact.add_argument("--depth", type=int, default=2, help="Upstream caller depth (default: 2)")
     p_impact.add_argument("--no-tests", action="store_true", help="Skip affected test suites search")
 
+    # sane read
+    p_read = subparsers.add_parser("read", parents=[repo_parent], help="Bounded structural file reading with attached context")
+    p_read.add_argument("file", help="File path relative to repo root")
+    p_read.add_argument("--start", type=int, default=1, help="1-based start line (default: 1)")
+    p_read.add_argument("--end", type=int, default=None, help="1-based end line (default: up to 150 lines)")
+    p_read.add_argument("--max-chars", type=int, default=12000, help="Maximum characters budget")
+
+    # sane context
+    p_ctx = subparsers.add_parser("context", parents=[repo_parent], help="Feature-level documentation and signature synthesis")
+    p_ctx.add_argument("feature", help="Feature, concept, or architecture name")
+    p_ctx.add_argument("--prefix", default=None, help="Optional directory prefix")
+    p_ctx.add_argument("--max-chars", type=int, default=10000, help="Maximum characters budget")
+
+    # sane tree
+    p_tree = subparsers.add_parser("tree", parents=[repo_parent], help="Bounded structural file tree")
+    p_tree.add_argument("dir", nargs="?", default=None, help="Directory to inspect (default: repo root)")
+    p_tree.add_argument("--depth", type=int, default=3, help="Maximum directory depth (default: 3)")
+    p_tree.add_argument("--max-entries", type=int, default=100, help="Maximum entries (default: 100)")
+
     # sane clean
     subparsers.add_parser("clean", parents=[repo_parent], help="Remove S.A.N.E. index and locks")
+
+    # sane watch
+    p_watch = subparsers.add_parser("watch", parents=[repo_parent], help="Manage background file watcher daemon")
+    p_watch.add_argument("--daemon", "--start", dest="daemon", action="store_true", help="Start background watcher daemon")
+    p_watch.add_argument("--stop", action="store_true", help="Stop background watcher daemon")
+    p_watch.add_argument("--status", action="store_true", help="Check watcher daemon status")
+    p_watch.add_argument("--foreground", action="store_true", help="Run watcher in foreground")
+    p_watch.add_argument("--debounce", type=int, default=300, help="Debounce milliseconds (default: 300)")
 
     # sane doctor
     subparsers.add_parser("doctor", parents=[repo_parent], help="Run diagnostic health checks")
 
     # sane setup
-    p_setup = subparsers.add_parser("setup", parents=[repo_parent], help="Generate MCP client configurations")
-    p_setup.add_argument("client", choices=["claude", "cursor", "vscode"], help="Target client")
-    p_setup.add_argument("--write", action="store_true", help="Write configuration file directly")
+    p_setup = subparsers.add_parser("setup", parents=[repo_parent], help="Generate agent skill configurations")
+    p_setup.add_argument("client", choices=["universal", "agents", "claude", "cursor", "gemini", "codex", "vscode"], help="Target client")
+    p_setup.add_argument("--write", action="store_true", help="Write skill configuration file directly")
 
     args = parser.parse_args()
 
@@ -663,7 +700,6 @@ def main() -> None:
         "init": cmd_init,
         "reinit": cmd_reinit,
         "index": cmd_index,
-        "serve": cmd_serve,
         "status": cmd_status,
         "search": cmd_search,
         "skeleton": cmd_skeleton,
@@ -672,7 +708,11 @@ def main() -> None:
         "implementations": cmd_implementations,
         "flow": cmd_flow,
         "impact": cmd_impact,
+        "read": cmd_read,
+        "context": cmd_context,
+        "tree": cmd_tree,
         "clean": cmd_clean,
+        "watch": cmd_watch,
         "doctor": cmd_doctor,
         "setup": cmd_setup,
     }
