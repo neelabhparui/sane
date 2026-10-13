@@ -464,7 +464,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         return 0
 
     if getattr(args, "daemon", False):
-        started, msg, pid = start_daemon(repo_root, debounce_ms=args.debounce)
+        started, msg, _ = start_daemon(repo_root, debounce_ms=args.debounce)
         print(msg)
         if started:
             print(f"Logs: {repo_root / '.sane' / 'watcher.log'}")

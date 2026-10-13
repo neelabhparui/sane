@@ -100,7 +100,7 @@ def start_daemon(repo_root: Path, debounce_ms: int = 300) -> tuple[bool, str, Op
     ]
 
     with open(log_path, "a", encoding="utf-8") as f:
-        proc = subprocess.Popen(
+        proc = subprocess.Popen(  # pylint: disable=consider-using-with
             cmd,
             stdout=f,
             stderr=subprocess.STDOUT,

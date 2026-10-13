@@ -400,7 +400,7 @@ def test_watcher_daemon_lifecycle(sample_cli_repo: Path, capsys):
     assert "STOPPED" in capsys.readouterr().out
 
     # Start daemon
-    started, msg, pid = start_daemon(sample_cli_repo, debounce_ms=100)
+    started, _, pid = start_daemon(sample_cli_repo, debounce_ms=100)
     assert started is True
     assert pid is not None
 
@@ -419,7 +419,7 @@ def test_watcher_daemon_lifecycle(sample_cli_repo: Path, capsys):
         assert "Background watcher daemon: Running" in capsys.readouterr().out
     finally:
         # Stop daemon
-        stopped, msg = stop_daemon(sample_cli_repo)
+        stopped, _ = stop_daemon(sample_cli_repo)
         assert stopped is True
         st3 = status_daemon(sample_cli_repo)
         assert st3["running"] is False

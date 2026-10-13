@@ -11,6 +11,18 @@ if TYPE_CHECKING:
     from sane_nav.mcp.session import SessionDedupTracker
 
 
+def _is_non_py_import_ended(line: str, paren_depth: int, brace_depth: int, is_start: bool) -> bool:
+    """Checks whether a non-Python import statement (or block) has completed on the current line."""
+    if paren_depth > 0 or brace_depth > 0:
+        return False
+    stripped = line.strip()
+    if stripped.endswith((";", '"', "'")):
+        return True
+    if is_start:
+        return not ("(" in line or "{" in line)
+    return stripped in (")", "}")
+
+
 def collapse_imports(skeleton: str, rel_path: str) -> str:
     """Collapses verbose top-level import blocks into a single clean comment to save agent tokens.
 
@@ -61,17 +73,7 @@ def collapse_imports(skeleton: str, rel_path: str) -> str:
                         import_ranges.append((start_idx, i))
                         start_idx = None
                 else:
-                    stripped = line.strip()
-                    if (
-                        paren_depth <= 0
-                        and brace_depth <= 0
-                        and (
-                            line.rstrip().endswith(";")
-                            or line.rstrip().endswith('"')
-                            or line.rstrip().endswith("'")
-                            or not ("(" in line or "{" in line)
-                        )
-                    ):
+                    if _is_non_py_import_ended(line, paren_depth, brace_depth, is_start=True):
                         in_import = False
                         import_ranges.append((start_idx, i))
                         start_idx = None
@@ -85,14 +87,7 @@ def collapse_imports(skeleton: str, rel_path: str) -> str:
                     import_ranges.append((start_idx, i))
                     start_idx = None
             else:
-                stripped = line.strip()
-                if paren_depth <= 0 and brace_depth <= 0 and (
-                    line.rstrip().endswith(";")
-                    or line.rstrip().endswith('"')
-                    or line.rstrip().endswith("'")
-                    or stripped == ")"
-                    or stripped == "}"
-                ):
+                if _is_non_py_import_ended(line, paren_depth, brace_depth, is_start=False):
                     in_import = False
                     assert start_idx is not None
                     import_ranges.append((start_idx, i))
